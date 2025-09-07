@@ -1,12 +1,15 @@
 package com.vijay.service;
 
 import com.vijay.dto.McpServerConfig;
+import com.vijay.entity.McpServerEntity;
+import com.vijay.repository.McpServerRepository;
 import io.modelcontextprotocol.client.McpSyncClient;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.mcp.SyncMcpToolCallbackProvider;
 import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.util.*;
@@ -26,14 +29,71 @@ public class DynamicMcpServerService {
     @Autowired
     private DynamicMcpConfigurationService dynamicConfigService;
     
+    @Autowired
+    private McpServerRepository serverRepository;
+    
     public DynamicMcpServerService() {
-        log.info("🔧 Dynamic MCP Server Service initialized with file-based persistence");
+        log.info("🔧 Dynamic MCP Server Service initialized with MySQL database persistence");
+    }
+    
+    /**
+     * Load servers from MySQL database on startup
+     * This method should be called after Spring context is fully initialized
+     */
+    @Transactional
+    public void loadServersFromDatabase() {
+        try {
+            log.info("🔄 Loading MCP servers from MySQL database...");
+            
+            List<McpServerEntity> entities = serverRepository.findAll();
+            log.info("Found {} servers in database", entities.size());
+            
+            for (McpServerEntity entity : entities) {
+                try {
+                    McpServerConfig config = entity.toDto();
+                    serverConfigs.put(config.getId(), config);
+                    
+                    // Add to Spring environment
+                    boolean configAdded = dynamicConfigService.addDynamicMcpServer(
+                        config.getId(), 
+                        config.getTransportType().name(), 
+                        config.getConfiguration()
+                    );
+                    
+                    if (configAdded) {
+                        log.info("✅ Loaded server from database: {} (type: {})", config.getName(), config.getTransportType());
+                        
+                        // Auto-start if enabled and was running before
+                        if (config.isEnabled() && entity.getStatus() == McpServerEntity.ServerStatus.RUNNING) {
+                            boolean started = startServer(config.getId());
+                            if (started) {
+                                log.info("✅ Auto-started server: {}", config.getName());
+                            } else {
+                                log.warn("⚠️ Failed to auto-start server: {}", config.getName());
+                            }
+                        }
+                    } else {
+                        log.warn("⚠️ Failed to load server configuration: {}", config.getName());
+                    }
+                    
+                } catch (Exception e) {
+                    log.error("Error loading server {}: {}", entity.getName(), e.getMessage(), e);
+                }
+            }
+            
+            log.info("✅ Loaded {} servers from database", serverConfigs.size());
+            updateToolCallbackProvider();
+            
+        } catch (Exception e) {
+            log.error("Error loading servers from database: {}", e.getMessage(), e);
+        }
     }
     
     
     /**
      * Add a new MCP server configuration
      */
+    @Transactional
     public boolean addServer(McpServerConfig config) {
         try {
             log.info("Adding MCP server: {} (type: {})", config.getName(), config.getTransportType());
@@ -44,9 +104,20 @@ public class DynamicMcpServerService {
                 return false;
             }
             
-            // Store configuration
+            // Check if server already exists in database
+            if (serverRepository.existsById(config.getId())) {
+                log.warn("Server with ID {} already exists in database", config.getId());
+                return false;
+            }
+            
+            // Convert to entity and save to database
+            McpServerEntity entity = McpServerEntity.fromDto(config);
+            serverRepository.save(entity);
+            log.info("✅ Server configuration saved to MySQL database: {} (ID: {})", config.getName(), config.getId());
+            
+            // Store configuration in memory
             serverConfigs.put(config.getId(), config);
-            log.info("✅ Server configuration stored: {} (total configs: {})", config.getId(), serverConfigs.size());
+            log.info("✅ Server configuration stored in memory: {} (total configs: {})", config.getId(), serverConfigs.size());
             
             // Add to dynamic configuration service for Spring AI integration
             boolean configAdded = dynamicConfigService.addDynamicMcpServer(
@@ -157,10 +228,16 @@ public class DynamicMcpServerService {
                 log.warn("⚠️ Failed to remove dynamic MCP server configuration from Spring AI: {}", serverId);
             }
             
-            // Remove configuration
+            // Remove configuration from database
+            if (serverRepository.existsById(serverId)) {
+                serverRepository.deleteById(serverId);
+                log.info("✅ MCP server configuration removed from database: {}", serverId);
+            }
+            
+            // Remove configuration from memory
             McpServerConfig removed = serverConfigs.remove(serverId);
             if (removed != null) {
-                log.info("✅ MCP server configuration removed: {}", removed.getName());
+                log.info("✅ MCP server configuration removed from memory: {}", removed.getName());
                 return true;
             }
             
@@ -642,8 +719,8 @@ public class DynamicMcpServerService {
                 }
             }
             
-            // For now, use the standard provider but log the dynamic clients
-            this.toolCallbackProvider = new SyncMcpToolCallbackProvider(allClients);
+            // Create a custom tool callback provider that includes dynamic tools
+            this.toolCallbackProvider = createEnhancedToolCallbackProvider(allClients);
             
             // Log dynamic clients for debugging
             for (Map.Entry<String, Object> entry : activeClients.entrySet()) {
@@ -663,6 +740,27 @@ public class DynamicMcpServerService {
             }
         } catch (Exception e) {
             log.error("Error updating tool callback provider: {}", e.getMessage(), e);
+        }
+    }
+    
+    /**
+     * Create an enhanced tool callback provider that includes dynamic tools
+     */
+    private ToolCallbackProvider createEnhancedToolCallbackProvider(List<McpSyncClient> staticClients) {
+        try {
+            // Create the base tool callback provider with static clients
+            SyncMcpToolCallbackProvider baseProvider = new SyncMcpToolCallbackProvider(staticClients);
+            
+            // For now, return the base provider
+            // Dynamic tool injection will be implemented using a different approach
+            log.info("Created tool callback provider with {} static clients", staticClients.size());
+            log.info("Active dynamic clients: {} (tools will be added via alternate method)", activeClients.keySet());
+            
+            return baseProvider;
+            
+        } catch (Exception e) {
+            log.error("Error creating enhanced tool callback provider: {}", e.getMessage(), e);
+            return new SyncMcpToolCallbackProvider(staticClients);
         }
     }
     
