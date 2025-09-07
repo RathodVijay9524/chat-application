@@ -6,6 +6,7 @@ import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.memory.MessageWindowChatMemory;
 import com.vijay.service.SystemMessageService;
+import com.vijay.service.DynamicMcpServerService;
 // import org.springframework.ai.huggingface.HuggingFaceChatModel; // Not available in Spring AI 1.0.1
 import org.springframework.ai.mcp.SyncMcpToolCallbackProvider;
 import org.springframework.ai.ollama.OllamaChatModel;
@@ -33,16 +34,24 @@ public class AIProviderConfig {
         return WebClient.builder();
     }
 
-    // Merge all MCP servers (only if MCP is enabled)
+    // Merge all MCP servers (static + dynamic)
     @Bean
     @Primary
-    public ToolCallbackProvider mcpToolCallbackProvider(@Autowired(required = false) List<McpSyncClient> mcpSyncClients) {
-        if (mcpSyncClients == null || mcpSyncClients.isEmpty()) {
+    public ToolCallbackProvider mcpToolCallbackProvider(@Autowired(required = false) List<McpSyncClient> mcpSyncClients,
+                                                       DynamicMcpServerService dynamicMcpServerService) {
+        // Initialize dynamic service with static clients
+        dynamicMcpServerService.setStaticClients(mcpSyncClients);
+        
+        // Get the combined tool callback provider from dynamic service
+        ToolCallbackProvider provider = dynamicMcpServerService.getToolCallbackProvider();
+        
+        if (provider == null) {
             logger.info("No MCP clients available, creating empty tool callback provider");
             return new SyncMcpToolCallbackProvider(List.of());
         }
-        logger.info("Creating MCP Tool Callback Provider with {} clients", mcpSyncClients.size());
-        return new SyncMcpToolCallbackProvider(mcpSyncClients);
+        
+        logger.info("Created MCP Tool Callback Provider with dynamic server management");
+        return provider;
     }
 
     // Chat Memory for conversation context
