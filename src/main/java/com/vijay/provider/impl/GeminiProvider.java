@@ -12,40 +12,28 @@ import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
-import org.springframework.web.reactive.function.client.WebClient;
-import reactor.core.publisher.Mono;
-
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 @Slf4j
 @Component
 public class GeminiProvider implements AIProvider {
 
-    private final WebClient webClient;
     private final String defaultApiKey;
-    private final String baseUrl;
-    private final WebClient.Builder webClientBuilder;
     private final DynamicApiKeyService dynamicApiKeyService;
     private final RAGService ragService;
     private final ChatClient chatClient;
     private final ToolCallbackProvider toolCallbackProvider;
 
     public GeminiProvider(@Value("${gemini.api-key:}") String apiKey,
-                          @Value("${gemini.base-url:https://generativelanguage.googleapis.com/v1beta/openai}") String baseUrl,
-                          WebClient.Builder webClientBuilder,
                           DynamicApiKeyService dynamicApiKeyService,
                           RAGService ragService,
                           @Qualifier("geminiChatClient") ChatClient chatClient,
                           ToolCallbackProvider toolCallbackProvider) {
         this.defaultApiKey = apiKey != null ? apiKey : "";
-        this.baseUrl = baseUrl;
-        this.webClientBuilder = webClientBuilder;
         this.dynamicApiKeyService = dynamicApiKeyService;
         this.ragService = ragService;
         this.chatClient = chatClient;
@@ -53,14 +41,7 @@ public class GeminiProvider implements AIProvider {
         
         System.out.println("🔧 Gemini Provider Initialization:");
         System.out.println("   Default API Key: " + (this.defaultApiKey != null && !this.defaultApiKey.isEmpty() ? this.defaultApiKey.substring(0, Math.min(8, this.defaultApiKey.length())) + "..." : "NULL"));
-        System.out.println("   Base URL: " + baseUrl);
-        
-        // Create default webClient with default API key
-        this.webClient = webClientBuilder
-                .baseUrl(baseUrl)
-                .defaultHeader("Authorization", "Bearer " + this.defaultApiKey)
-                .defaultHeader("Content-Type", "application/json")
-                .build();
+        System.out.println("   Using ChatClient with MessageChatMemoryAdvisor for memory management");
     }
     
     @Override
@@ -87,21 +68,11 @@ public class GeminiProvider implements AIProvider {
             // Build enhanced prompt with RAG context
             String enhancedPrompt = buildEnhancedPrompt(request.getMessage(), ragContext);
             
-            // Get API key - use dynamic key from request if available, otherwise use default
+            // Get API key for logging purposes
             String apiKey = dynamicApiKeyService.getApiKeyForProvider("gemini", request);
             if (apiKey == null || apiKey.trim().isEmpty()) {
                 apiKey = defaultApiKey;
             }
-            
-            // Create WebClient with the appropriate API key
-            WebClient clientToUse = webClient;
-            if (dynamicApiKeyService.hasValidApiKey("gemini", request)) {
-                clientToUse = dynamicApiKeyService.createWebClientWithApiKey("gemini", apiKey, baseUrl, webClientBuilder);
-            }
-            
-            // Prepare request body for Gemini API
-            Map<String, Object> requestBody = new HashMap<>();
-            requestBody.put("model", request.getModel() != null ? request.getModel() : "gemini-1.5-flash");
             
             // Load system message from resources
             String systemMessage = loadSystemMessage();
@@ -111,48 +82,15 @@ public class GeminiProvider implements AIProvider {
             String toolInfo = getMCPToolInfo();
             String enhancedSystemMessage = systemMessage + "\n\nAvailable MCP Tools (" + mcpToolCount + "):\n" + toolInfo;
             
-            // Use WebClient API call with enhanced system message
-            String systemPrompt = "System: " + enhancedSystemMessage + "\n\nUser: " + enhancedPrompt;
-            
-            List<Map<String, String>> messages = Arrays.asList(
-                Map.of("role", "user", "content", systemPrompt)
-            );
-            requestBody.put("messages", messages);
-            
-            log.info("Sending request to Gemini API with {} messages (including system message)", messages.size());
-            log.debug("System message: {}", systemMessage);
-            log.debug("User message: {}", enhancedPrompt);
-            
-            // Gemini API parameters
-            requestBody.put("temperature", 0.7);
-            requestBody.put("max_tokens", 1000);
-            
-            // Make API call to Gemini
-            @SuppressWarnings("unchecked")
-            Map<String, Object> response = clientToUse.post()
-                    .uri("/chat/completions")
-                    .bodyValue(requestBody)
-                    .retrieve()
-                    .onStatus(status -> status.is4xxClientError() || status.is5xxServerError(),
-                            clientResponse -> clientResponse.bodyToMono(String.class)
-                                    .flatMap(errorBody -> Mono.error(new RuntimeException("Gemini API Error: " + errorBody))))
-                    .bodyToMono(Map.class)
-                    .block();
-            
-            // Extract response content
-            String content = "";
-            if (response != null && response.containsKey("choices")) {
-                @SuppressWarnings("unchecked")
-                List<Map<String, Object>> choices = (List<Map<String, Object>>) response.get("choices");
-                if (!choices.isEmpty()) {
-                    @SuppressWarnings("unchecked")
-                    Map<String, Object> message = (Map<String, Object>) choices.get(0).get("message");
-                    content = (String) message.get("content");
-                }
-            }
+            // Use ChatClient for memory management, then WebClient for API call
+            String response = chatClient.prompt()
+                    .system(enhancedSystemMessage)
+                    .user(enhancedPrompt)
+                    .call()
+                    .content();
             
             // Check if AI is requesting MCP tool usage and execute if needed
-            content = processAIToolRequests(content, request.getMessage());
+            String content = processAIToolRequests(response, request.getMessage());
 
             long responseTime = System.currentTimeMillis() - startTime;
             

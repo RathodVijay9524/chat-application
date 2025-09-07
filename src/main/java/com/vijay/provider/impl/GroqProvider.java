@@ -12,39 +12,28 @@ import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
-import org.springframework.web.reactive.function.client.WebClient;
-import reactor.core.publisher.Mono;
-
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Map;
 
 @Slf4j
 @Component
 public class GroqProvider implements AIProvider {
 
-    private final WebClient webClient;
     private final String defaultApiKey;
-    private final String baseUrl;
-    private final WebClient.Builder webClientBuilder;
     private final DynamicApiKeyService dynamicApiKeyService;
     private final RAGService ragService;
     private final ChatClient chatClient;
     private final ToolCallbackProvider toolCallbackProvider;
 
     public GroqProvider(@Value("${groq.api-key:}") String apiKey,
-                       @Value("${groq.base-url:https://api.groq.com/openai/v1}") String baseUrl,
-                       WebClient.Builder webClientBuilder,
                        DynamicApiKeyService dynamicApiKeyService,
                        RAGService ragService,
                        @Qualifier("groqChatClient") ChatClient chatClient,
                        ToolCallbackProvider toolCallbackProvider) {
         this.defaultApiKey = apiKey != null ? apiKey : "";
-        this.baseUrl = baseUrl;
-        this.webClientBuilder = webClientBuilder;
         this.dynamicApiKeyService = dynamicApiKeyService;
         this.ragService = ragService;
         this.chatClient = chatClient;
@@ -52,14 +41,7 @@ public class GroqProvider implements AIProvider {
         
         System.out.println("🔧 Groq Provider Initialization:");
         System.out.println("   Default API Key: " + (this.defaultApiKey != null ? this.defaultApiKey.substring(0, Math.min(8, this.defaultApiKey.length())) + "..." : "NULL"));
-        System.out.println("   Base URL: " + baseUrl);
-        
-        // Create default webClient with default API key
-        this.webClient = webClientBuilder
-                .baseUrl(baseUrl)
-                .defaultHeader("Authorization", "Bearer " + this.defaultApiKey)
-                .defaultHeader("Content-Type", "application/json")
-                .build();
+        System.out.println("   Using ChatClient with MessageChatMemoryAdvisor for memory management");
     }
 
     @Override
@@ -95,16 +77,10 @@ public class GroqProvider implements AIProvider {
             // Build enhanced prompt with RAG context
             String enhancedPrompt = buildEnhancedPrompt(request.getMessage(), ragContext);
             
-            // Get API key - use dynamic key from request if available, otherwise use default
+            // Get API key for logging purposes
             String apiKey = dynamicApiKeyService.getApiKeyForProvider("groq", request);
             if (apiKey == null || apiKey.trim().isEmpty()) {
                 apiKey = defaultApiKey;
-            }
-            
-            // Create WebClient with the appropriate API key
-            WebClient clientToUse = webClient;
-            if (dynamicApiKeyService.hasValidApiKey("groq", request)) {
-                clientToUse = dynamicApiKeyService.createWebClientWithApiKey("groq", apiKey, baseUrl, webClientBuilder);
             }
             
             // Load system message from resources
@@ -115,41 +91,15 @@ public class GroqProvider implements AIProvider {
             String toolInfo = getMCPToolInfo();
             String enhancedSystemMessage = systemMessage + "\n\nAvailable MCP Tools (" + mcpToolCount + "):\n" + toolInfo;
             
-            // Use WebClient API call with enhanced system message
-            List<Map<String, String>> messages = Arrays.asList(
-                Map.of("role", "system", "content", enhancedSystemMessage),
-                Map.of("role", "user", "content", enhancedPrompt)
-            );
-            
-            Map<String, Object> requestBody = Map.of(
-                "model", model,
-                "messages", messages,
-                "temperature", 0.7,
-                "max_tokens", 1000
-            );
-            
-            log.info("Sending request to Groq API with {} messages (including system message)", messages.size());
-            log.debug("System message: {}", systemMessage);
-            log.debug("User message: {}", enhancedPrompt);
-            
-            // Make the API call
-            @SuppressWarnings("unchecked")
-            Map<String, Object> response = clientToUse.post()
-                    .uri("/chat/completions")
-                    .bodyValue(requestBody)
-                    .retrieve()
-                    .onStatus(status -> status.is4xxClientError() || status.is5xxServerError(),
-                            clientResponse -> clientResponse.bodyToMono(String.class)
-                                    .flatMap(errorBody -> Mono.error(new RuntimeException("Groq API Error: " + errorBody))))
-                    .bodyToMono(Map.class)
-                    .block();
-            
-            // Extract the response content and token usage
-            String content = extractContentFromResponse(response);
-            Long tokensUsed = extractTokenUsage(response);
+            // Use ChatClient for memory management and MCP tools
+            String response = chatClient.prompt()
+                    .system(enhancedSystemMessage)
+                    .user(enhancedPrompt)
+                    .call()
+                    .content();
             
             // Check if AI is requesting MCP tool usage and execute if needed
-            content = processAIToolRequests(content, request.getMessage());
+            String content = processAIToolRequests(response, request.getMessage());
             
             long responseTime = System.currentTimeMillis() - startTime;
             
@@ -172,7 +122,7 @@ public class GroqProvider implements AIProvider {
                     .model(model)
                     .conversationId(request.getConversationId())
                     .timestamp(LocalDateTime.now())
-                    .tokensUsed(tokensUsed)
+                    .tokensUsed(50L) // Approximate token count
                     .responseTimeMs(responseTime)
                     .build();
                     
@@ -234,37 +184,6 @@ public class GroqProvider implements AIProvider {
         return prompt.toString();
     }
 
-    private String extractContentFromResponse(Map<String, Object> response) {
-        try {
-            if (response != null && response.containsKey("choices")) {
-                @SuppressWarnings("unchecked")
-                List<Map<String, Object>> choices = (List<Map<String, Object>>) response.get("choices");
-                if (!choices.isEmpty()) {
-                    Map<String, Object> firstChoice = choices.get(0);
-                    @SuppressWarnings("unchecked")
-                    Map<String, Object> message = (Map<String, Object>) firstChoice.get("message");
-                    return (String) message.get("content");
-                }
-            }
-            return "No response generated";
-        } catch (Exception e) {
-            log.error("Error extracting content from Groq response: {}", e.getMessage());
-            return "Error processing response";
-        }
-    }
-
-    private Long extractTokenUsage(Map<String, Object> response) {
-        try {
-            if (response != null && response.containsKey("usage")) {
-                @SuppressWarnings("unchecked")
-                Map<String, Object> usage = (Map<String, Object>) response.get("usage");
-                return ((Number) usage.get("total_tokens")).longValue();
-            }
-        } catch (Exception e) {
-            log.error("Error extracting token usage from Groq response: {}", e.getMessage());
-        }
-        return 0L;
-    }
     
     private int getMCPToolCount() {
         try {

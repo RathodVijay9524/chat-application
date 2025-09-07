@@ -6,42 +6,39 @@ import com.vijay.dto.ProviderInfo;
 import com.vijay.provider.AIProvider;
 import com.vijay.service.RAGService;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.tool.ToolCallbackProvider;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
-import org.springframework.web.reactive.function.client.WebClient;
-import reactor.core.publisher.Mono;
 
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 @Slf4j
 @Component
 public class OpenRouterProvider implements AIProvider {
 
-    private final WebClient webClient;
     private final String apiKey;
     private final RAGService ragService;
     private final ToolCallbackProvider toolCallbackProvider;
+    private final ChatClient chatClient;
 
     public OpenRouterProvider(@Value("${spring.ai.openrouter.api-key:}") String apiKey,
-                             @Value("${spring.ai.openrouter.base-url:https://openrouter.ai/api/v1}") String baseUrl,
-                             WebClient.Builder webClientBuilder,
                              RAGService ragService,
-                             ToolCallbackProvider toolCallbackProvider) {
+                             ToolCallbackProvider toolCallbackProvider,
+                             @Qualifier("openRouterChatClient") ChatClient chatClient) {
         this.apiKey = apiKey;
         this.ragService = ragService;
         this.toolCallbackProvider = toolCallbackProvider;
-        this.webClient = webClientBuilder
-                .baseUrl(baseUrl)
-                .defaultHeader("Authorization", "Bearer " + apiKey)
-                .defaultHeader("Content-Type", "application/json")
-                .build();
+        this.chatClient = chatClient;
+        
+        System.out.println("🔧 OpenRouter Provider Initialization:");
+        System.out.println("   API Key: " + (apiKey != null && !apiKey.isEmpty() ? apiKey.substring(0, Math.min(8, apiKey.length())) + "..." : "NOT SET"));
+        System.out.println("   Using ChatClient with MessageChatMemoryAdvisor for memory management");
     }
     
     @Override
@@ -68,9 +65,8 @@ public class OpenRouterProvider implements AIProvider {
             // Build enhanced prompt with RAG context
             String enhancedPrompt = buildEnhancedPrompt(request.getMessage(), ragContext);
             
-            // Prepare request body for OpenRouter API (OpenAI compatible)
-            Map<String, Object> requestBody = new HashMap<>();
-            requestBody.put("model", request.getModel() != null ? request.getModel() : "openai/gpt-3.5-turbo");
+            // Model for logging purposes
+            String model = request.getModel() != null ? request.getModel() : "openai/gpt-3.5-turbo";
 
             // Load system message from resources
             String systemMessage = loadSystemMessage();
@@ -80,39 +76,15 @@ public class OpenRouterProvider implements AIProvider {
             String toolInfo = getMCPToolInfo();
             String enhancedSystemMessage = systemMessage + "\n\nAvailable MCP Tools (" + mcpToolCount + "):\n" + toolInfo;
             
-            // Use WebClient API call with enhanced system message
-            List<Map<String, String>> messages = Arrays.asList(
-                    Map.of("role", "system", "content", enhancedSystemMessage),
-                    Map.of("role", "user", "content", enhancedPrompt)
-            );
-            requestBody.put("messages", messages);
-            
-            // Make API call to OpenRouter
-            @SuppressWarnings("unchecked")
-            Map<String, Object> response = webClient.post()
-                    .uri("/chat/completions")
-                    .bodyValue(requestBody)
-                    .retrieve()
-                    .onStatus(status -> status.is4xxClientError() || status.is5xxServerError(),
-                            clientResponse -> clientResponse.bodyToMono(String.class)
-                                    .flatMap(errorBody -> Mono.error(new RuntimeException("OpenRouter API Error: " + errorBody))))
-                    .bodyToMono(Map.class)
-                    .block();
-            
-            // Extract response content
-            String content = "";
-            if (response != null && response.containsKey("choices")) {
-                @SuppressWarnings("unchecked")
-                List<Map<String, Object>> choices = (List<Map<String, Object>>) response.get("choices");
-                if (!choices.isEmpty()) {
-                    @SuppressWarnings("unchecked")
-                    Map<String, Object> message = (Map<String, Object>) choices.get(0).get("message");
-                    content = (String) message.get("content");
-                }
-            }
+            // Use ChatClient for memory management and MCP tools
+            String response = chatClient.prompt()
+                    .system(enhancedSystemMessage)
+                    .user(enhancedPrompt)
+                    .call()
+                    .content();
             
             // Check if AI is requesting MCP tool usage and execute if needed
-            content = processAIToolRequests(content, request.getMessage());
+            String content = processAIToolRequests(response, request.getMessage());
 
             long responseTime = System.currentTimeMillis() - startTime;
 
@@ -131,7 +103,7 @@ public class OpenRouterProvider implements AIProvider {
             return ChatResponse.builder()
                     .response(content)
                     .provider(getProviderName())
-                    .model(request.getModel() != null ? request.getModel() : "openai/gpt-3.5-turbo")
+                    .model(model)
                     .conversationId(request.getConversationId())
                     .timestamp(LocalDateTime.now())
                     .tokensUsed(45L) // Approximate token count
