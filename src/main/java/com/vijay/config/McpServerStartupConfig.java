@@ -18,13 +18,19 @@ public class McpServerStartupConfig {
     private DynamicMcpServerService mcpServerService;
     
     /**
-     * Load MCP servers from MySQL database when application is ready
+     * Load MCP servers from MySQL database and auto-start enabled servers when application is ready
      */
     @EventListener(ApplicationReadyEvent.class)
     public void onApplicationReady() {
         log.info("🚀 Application ready - loading MCP servers from MySQL database...");
         try {
+            // Load servers from database
             mcpServerService.loadServersFromDatabase();
+            
+            // Auto-start all enabled servers
+            log.info("🔄 Auto-starting enabled dynamic servers...");
+            mcpServerService.autoStartEnabledServers();
+            
             log.info("✅ MCP server startup configuration completed");
         } catch (Exception e) {
             log.error("❌ Error during MCP server startup configuration: {}", e.getMessage(), e);

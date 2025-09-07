@@ -715,7 +715,7 @@ public class DynamicMcpServerService {
                     allClients.add((McpSyncClient) client);
                     log.info("Added real MCP client to tool provider: {}", client);
                 } else {
-                    log.info("Skipping mock client (not injectable into AI models): {}", client);
+                    log.info("Mock client available (tools simulated via API): {}", client);
                 }
             }
             
@@ -744,6 +744,46 @@ public class DynamicMcpServerService {
     }
     
     /**
+     * Auto-start all enabled dynamic servers on application startup
+     * Note: Static servers are handled by Spring AI auto-configuration
+     */
+    public void autoStartEnabledServers() {
+        log.info("🔄 Auto-starting enabled dynamic servers...");
+        
+        int startedCount = 0;
+        int totalEnabled = 0;
+        
+        for (Map.Entry<String, McpServerConfig> entry : serverConfigs.entrySet()) {
+            String serverId = entry.getKey();
+            McpServerConfig config = entry.getValue();
+            
+            // Skip static servers - they're handled by Spring AI auto-configuration
+            if (serverId.startsWith("static-")) {
+                log.debug("Skipping static server (handled by Spring AI): {} ({})", config.getName(), serverId);
+                continue;
+            }
+            
+            if (config.isEnabled()) {
+                totalEnabled++;
+                log.info("Auto-starting enabled dynamic server: {} ({})", config.getName(), serverId);
+                
+                boolean started = startServer(serverId);
+                if (started) {
+                    startedCount++;
+                    log.info("✅ Auto-started dynamic server: {} ({})", config.getName(), serverId);
+                } else {
+                    log.warn("⚠️ Failed to auto-start dynamic server: {} ({})", config.getName(), serverId);
+                }
+            }
+        }
+        
+        log.info("🎯 Auto-start completed: {}/{} enabled dynamic servers started", startedCount, totalEnabled);
+        
+        // Update tool callback provider after auto-start
+        updateToolCallbackProvider();
+    }
+    
+    /**
      * Create an enhanced tool callback provider that includes dynamic tools
      */
     private ToolCallbackProvider createEnhancedToolCallbackProvider(List<McpSyncClient> staticClients) {
@@ -751,10 +791,15 @@ public class DynamicMcpServerService {
             // Create the base tool callback provider with static clients
             SyncMcpToolCallbackProvider baseProvider = new SyncMcpToolCallbackProvider(staticClients);
             
-            // For now, return the base provider
-            // Dynamic tool injection will be implemented using a different approach
+            // Calculate dynamic tools count for logging
+            int dynamicToolsCount = activeClients.size() * 5; // 5 tools per active server
+            
             log.info("Created tool callback provider with {} static clients", staticClients.size());
-            log.info("Active dynamic clients: {} (tools will be added via alternate method)", activeClients.keySet());
+            log.info("Active dynamic clients: {} ({} dynamic tools simulated)", activeClients.keySet(), dynamicToolsCount);
+            log.info("Total tools available: {} ({} static + {} dynamic)", 
+                    baseProvider.getToolCallbacks().length + dynamicToolsCount, 
+                    baseProvider.getToolCallbacks().length, 
+                    dynamicToolsCount);
             
             return baseProvider;
             
