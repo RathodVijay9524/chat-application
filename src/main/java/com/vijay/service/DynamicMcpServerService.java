@@ -21,6 +21,9 @@ import java.io.IOException;
 public class DynamicMcpServerService {
     
     private final Map<String, Object> activeClients = new ConcurrentHashMap<>(); // Using Object to handle both real and mock clients
+    
+    // Active processes for cleanup
+    private final Map<String, Process> activeProcesses = new ConcurrentHashMap<>();
     private final Map<String, McpServerConfig> serverConfigs = new ConcurrentHashMap<>();
     private final List<McpSyncClient> staticClients = new ArrayList<>();
     
@@ -50,6 +53,12 @@ public class DynamicMcpServerService {
             
             for (McpServerEntity entity : entities) {
                 try {
+                    // Skip static servers (they should only come from application.properties)
+                    if (entity.getId().startsWith("static-")) {
+                        log.debug("Skipping static server from database: {} (should be loaded from application.properties)", entity.getId());
+                        continue;
+                    }
+                    
                     McpServerConfig config = entity.toDto();
                     serverConfigs.put(config.getId(), config);
                     
@@ -97,6 +106,13 @@ public class DynamicMcpServerService {
     public boolean addServer(McpServerConfig config) {
         try {
             log.info("Adding MCP server: {} (type: {})", config.getName(), config.getTransportType());
+            
+            // Auto-generate ID if missing
+            if (config.getId() == null || config.getId().trim().isEmpty()) {
+                String generatedId = generateServerId(config.getName(), config.getTransportType());
+                config.setId(generatedId);
+                log.info("Auto-generated server ID: {} for server: {}", generatedId, config.getName());
+            }
             
             // Validate configuration
             if (!validateConfig(config)) {
@@ -196,8 +212,8 @@ public class DynamicMcpServerService {
                 // Close client connection
                 if (client instanceof McpSyncClient) {
                     ((McpSyncClient) client).close();
-                } else if (client instanceof MockMcpSyncClient) {
-                    ((MockMcpSyncClient) client).closeGracefully();
+                } else if (client instanceof RealStdioMcpClient) {
+                    ((RealStdioMcpClient) client).disconnect();
                 }
                 updateToolCallbackProvider();
                 log.info("✅ MCP server stopped: {}", serverId);
@@ -255,7 +271,15 @@ public class DynamicMcpServerService {
         log.info("Getting all servers - serverConfigs size: {}, activeClients size: {}", 
                 serverConfigs.size(), activeClients.size());
         log.info("Server IDs in configs: {}", serverConfigs.keySet());
-        return new ArrayList<>(serverConfigs.values());
+        
+        // Filter out static servers - only return dynamic servers
+        List<McpServerConfig> dynamicServers = serverConfigs.entrySet().stream()
+                .filter(entry -> !entry.getKey().startsWith("static-"))
+                .map(Map.Entry::getValue)
+                .collect(java.util.stream.Collectors.toList());
+        
+        log.info("Returning {} dynamic servers (filtered out static servers)", dynamicServers.size());
+        return dynamicServers;
     }
     
     /**
@@ -266,12 +290,22 @@ public class DynamicMcpServerService {
     }
     
     /**
+     * Get active clients map
+     */
+    public Map<String, Object> getActiveClients() {
+        return new HashMap<>(activeClients);
+    }
+    
+    /**
      * Get active server status
      */
     public Map<String, Boolean> getServerStatus() {
         Map<String, Boolean> status = new HashMap<>();
+        // Only include dynamic servers (filter out static servers)
         for (String serverId : serverConfigs.keySet()) {
-            status.put(serverId, activeClients.containsKey(serverId));
+            if (!serverId.startsWith("static-")) {
+                status.put(serverId, activeClients.containsKey(serverId));
+            }
         }
         return status;
     }
@@ -401,7 +435,7 @@ public class DynamicMcpServerService {
                     try {
                         // Use Spring AI's McpClient builder to create a real client
                         // This approach mimics how Spring AI auto-configuration creates clients
-                        McpSyncClient realClient = createRealStdioClient(processBuilder, config.getName());
+                        Object realClient = createRealStdioClient(processBuilder, config.getName());
                         
                         if (realClient != null) {
                             log.info("✅ Real STDIO MCP client created successfully for: {}", config.getName());
@@ -410,23 +444,23 @@ public class DynamicMcpServerService {
                             log.info("Environment: {}", environment);
                             return realClient;
                         } else {
-                            log.warn("Failed to create real client, using mock");
-                            return createMockClient(config.getName(), "STDIO");
+                            log.warn("Failed to create real STDIO client");
+                            return null;
                         }
                         
                     } catch (Exception e) {
                         log.error("Error creating real STDIO client: {}", e.getMessage());
-                        return createMockClient(config.getName(), "STDIO");
+                        return null;
                     }
                     
                 } catch (Exception e) {
-                    log.error("Error creating real STDIO client, using mock: {}", e.getMessage());
-                    return createMockClient(config.getName(), "STDIO");
+                    log.error("Error creating real STDIO client: {}", e.getMessage());
+                    return null;
                 }
                 
             } catch (Exception e) {
-                log.error("Error creating real STDIO client, using mock: {}", e.getMessage());
-                return createMockClient(config.getName(), "STDIO");
+                log.error("Error creating real STDIO client: {}", e.getMessage());
+                return null;
             }
             
         } catch (Exception e) {
@@ -475,25 +509,19 @@ public class DynamicMcpServerService {
                         })
                         .build();
                 
-                // For now, create a mock client that simulates real functionality
+                // SSE client creation not yet implemented
                 // TODO: Implement actual SSE client creation when proper Spring AI MCP classes are available
-                log.info("Creating enhanced mock SSE client for: {}", config.getName());
-                
-                // Create an enhanced mock that simulates real MCP behavior
-                MockMcpSyncClient mockClient = new MockMcpSyncClient(config.getName(), "SSE");
-                
-                // Simulate successful connection
-                log.info("✅ Mock SSE client created successfully for: {}", config.getName());
+                log.warn("SSE client creation not yet implemented for: {}", config.getName());
                 log.info("URL: {}", url);
                 log.info("Endpoint: {}", endpoint);
                 log.info("Message Endpoint: {}", messageEndpoint);
                 log.info("Headers: {}", headers);
                 
-                return mockClient;
+                return null;
                 
             } catch (Exception e) {
-                log.error("Error creating real SSE client, using mock: {}", e.getMessage());
-                return createMockClient(config.getName(), "SSE");
+                log.error("Error creating SSE client: {}", e.getMessage());
+                return null;
             }
             
         } catch (Exception e) {
@@ -535,21 +563,19 @@ public class DynamicMcpServerService {
                 // TODO: Implement actual Socket client creation when proper Spring AI MCP classes are available
                 log.info("Creating enhanced mock Socket client for: {}", config.getName());
                 
-                // Create an enhanced mock that simulates real MCP behavior
-                MockMcpSyncClient mockClient = new MockMcpSyncClient(config.getName(), "SOCKET");
-                
-                // Simulate successful connection
-                log.info("✅ Mock Socket client created successfully for: {}", config.getName());
+                // SOCKET client creation not yet implemented
+                // TODO: Implement actual SOCKET client creation when proper Spring AI MCP classes are available
+                log.warn("SOCKET client creation not yet implemented for: {}", config.getName());
                 log.info("Host: {}", host);
                 log.info("Port: {}", port);
                 log.info("Protocol: {}", protocol);
                 log.info("Options: {}", options);
                 
-                return mockClient;
+                return null;
                 
             } catch (Exception e) {
-                log.error("Error creating real Socket client, using mock: {}", e.getMessage());
-                return createMockClient(config.getName(), "SOCKET");
+                log.error("Error creating SOCKET client: {}", e.getMessage());
+                return null;
             }
             
         } catch (Exception e) {
@@ -561,17 +587,22 @@ public class DynamicMcpServerService {
     /**
      * Create a real STDIO MCP client using Spring AI's builder pattern
      */
-    private McpSyncClient createRealStdioClient(ProcessBuilder processBuilder, String name) {
+    private Object createRealStdioClient(ProcessBuilder processBuilder, String name) {
         try {
             log.info("Creating real STDIO MCP client for: {}", name);
             
-            // For now, we'll create a mock client but with enhanced functionality
-            // TODO: Implement actual real MCP client creation
-            // The challenge is that McpSyncClient constructor is not accessible
-            // We need to find a different approach to create real clients
+            // Start the process
+            Process process = processBuilder.start();
+            log.info("Started STDIO process for: {} (PID: {})", name, process.pid());
             
-            log.warn("Real MCP client creation not yet implemented - using enhanced mock");
-            return null; // This will trigger fallback to mock client
+            // Store process for cleanup
+            String serverId = findServerIdByName(name);
+            if (serverId != null) {
+                activeProcesses.put(serverId, process);
+            }
+            
+            // Create a real STDIO MCP client
+            return new RealStdioMcpClient(name, process);
             
         } catch (Exception e) {
             log.error("Error in createRealStdioClient for {}: {}", name, e.getMessage(), e);
@@ -580,30 +611,50 @@ public class DynamicMcpServerService {
     }
     
     /**
-     * Create a mock client for testing purposes
+     * Find server ID by name
      */
-    private Object createMockClient(String name, String type) {
-        try {
-            log.info("Creating mock {} client for: {}", type, name);
-            
-            // Create a mock transport that doesn't actually connect
-            // This is for testing the API endpoints without real MCP servers
-            return new MockMcpSyncClient(name, type);
-            
-        } catch (Exception e) {
-            log.error("Error creating mock client for {}: {}", name, e.getMessage(), e);
-            return null;
+    private String findServerIdByName(String name) {
+        for (Map.Entry<String, McpServerConfig> entry : serverConfigs.entrySet()) {
+            if (name.equals(entry.getValue().getName())) {
+                return entry.getKey();
+            }
         }
+        return null;
     }
+    
+    /**
+     * Generate a unique server ID based on name and transport type
+     */
+    private String generateServerId(String name, McpServerConfig.McpTransportType transportType) {
+        String baseId = name.toLowerCase()
+                .replaceAll("[^a-z0-9]", "-")
+                .replaceAll("-+", "-")
+                .replaceAll("^-|-$", "");
+        
+        String transportSuffix = transportType.name().toLowerCase();
+        String generatedId = baseId + "-" + transportSuffix;
+        
+        // Ensure uniqueness by adding counter if needed
+        String finalId = generatedId;
+        int counter = 1;
+        while (serverConfigs.containsKey(finalId) || serverRepository.existsById(finalId)) {
+            finalId = generatedId + "-" + counter;
+            counter++;
+        }
+        
+        return finalId;
+    }
+    
     
     /**
      * Validate server configuration
      */
     private boolean validateConfig(McpServerConfig config) {
-        if (config.getId() == null || config.getId().trim().isEmpty()) {
-            log.error("Server ID is required");
-            return false;
-        }
+        // ID will be auto-generated if missing, so we don't validate it here
+        // if (config.getId() == null || config.getId().trim().isEmpty()) {
+        //     log.error("Server ID is required");
+        //     return false;
+        // }
         
         if (config.getName() == null || config.getName().trim().isEmpty()) {
             log.error("Server name is required");
@@ -714,6 +765,11 @@ public class DynamicMcpServerService {
                 if (client instanceof McpSyncClient) {
                     allClients.add((McpSyncClient) client);
                     log.info("Added real MCP client to tool provider: {}", client);
+                } else if (client instanceof RealStdioMcpClient) {
+                    // Real STDIO clients provide actual tools
+                    log.info("Real STDIO client available: {} (PID: {})", 
+                            ((RealStdioMcpClient) client).getName(), 
+                            ((RealStdioMcpClient) client).getProcess().pid());
                 } else {
                     log.info("Mock client available (tools simulated via API): {}", client);
                 }
@@ -791,16 +847,42 @@ public class DynamicMcpServerService {
             // Create the base tool callback provider with static clients
             SyncMcpToolCallbackProvider baseProvider = new SyncMcpToolCallbackProvider(staticClients);
             
-            // Calculate dynamic tools count for logging
-            int dynamicToolsCount = activeClients.size() * 5; // 5 tools per active server
+            // Count real tools from RealStdioMcpClient instances
+            int realDynamicToolsCount = 0;
+            for (Object client : activeClients.values()) {
+                if (client instanceof RealStdioMcpClient) {
+                    try {
+                        List<Object> tools = ((RealStdioMcpClient) client).listTools();
+                        realDynamicToolsCount += tools.size();
+                        log.info("Real STDIO client {} provides {} tools", 
+                                ((RealStdioMcpClient) client).getName(), tools.size());
+                    } catch (Exception e) {
+                        log.warn("Error getting tools from real STDIO client {}: {}", 
+                                ((RealStdioMcpClient) client).getName(), e.getMessage());
+                    }
+                }
+            }
+            
+            // Count mock tools (for non-real clients)
+            int mockToolsCount = 0;
+            for (Object client : activeClients.values()) {
+                if (!(client instanceof RealStdioMcpClient) && !(client instanceof McpSyncClient)) {
+                    mockToolsCount += 5; // 5 tools per mock server
+                }
+            }
+            
+            int totalDynamicTools = realDynamicToolsCount + mockToolsCount;
             
             log.info("Created tool callback provider with {} static clients", staticClients.size());
-            log.info("Active dynamic clients: {} ({} dynamic tools simulated)", activeClients.keySet(), dynamicToolsCount);
+            log.info("Active dynamic clients: {} ({} real tools + {} mock tools = {} total dynamic)", 
+                    activeClients.keySet(), realDynamicToolsCount, mockToolsCount, totalDynamicTools);
             log.info("Total tools available: {} ({} static + {} dynamic)", 
-                    baseProvider.getToolCallbacks().length + dynamicToolsCount, 
+                    baseProvider.getToolCallbacks().length + totalDynamicTools, 
                     baseProvider.getToolCallbacks().length, 
-                    dynamicToolsCount);
+                    totalDynamicTools);
             
+            // For now, return the base provider
+            // TODO: Implement proper dynamic tool injection
             return baseProvider;
             
         } catch (Exception e) {

@@ -257,21 +257,35 @@ public class McpServerController {
                 tools.add(toolInfo);
             }
             
-            // Add dynamic tools (simulated)
+            // Add dynamic tools (real and simulated)
             List<String> activeServers = mcpServerService.getActiveServers();
             int dynamicToolsCount = 0;
             
-            for (String serverId : activeServers) {
-                // Each active STDIO server adds 5 tools
-                for (int i = 1; i <= 5; i++) {
-                    Map<String, Object> dynamicToolInfo = new HashMap<>();
-                    dynamicToolInfo.put("name", getToolName(i) + "_" + serverId);
-                    dynamicToolInfo.put("description", getToolDescription(i) + " via " + serverId);
-                    dynamicToolInfo.put("type", "DYNAMIC_MCP_TOOL");
-                    dynamicToolInfo.put("serverId", serverId);
-                    tools.add(dynamicToolInfo);
-                    dynamicToolsCount++;
+            // Get real tools from active servers
+            var activeClients = mcpServerService.getActiveClients();
+            for (Object client : activeClients.values()) {
+                if (client instanceof com.vijay.service.RealStdioMcpClient) {
+                    try {
+                        List<Object> realTools = ((com.vijay.service.RealStdioMcpClient) client).listTools();
+                        for (Object tool : realTools) {
+                            if (tool instanceof Map) {
+                                @SuppressWarnings("unchecked")
+                                Map<String, Object> toolMap = (Map<String, Object>) tool;
+                                Map<String, Object> dynamicToolInfo = new HashMap<>();
+                                dynamicToolInfo.put("name", toolMap.get("name"));
+                                dynamicToolInfo.put("description", toolMap.get("description"));
+                                dynamicToolInfo.put("type", "REAL_DYNAMIC_MCP_TOOL");
+                                dynamicToolInfo.put("serverId", ((com.vijay.service.RealStdioMcpClient) client).getName());
+                                dynamicToolInfo.put("inputSchema", toolMap.get("inputSchema"));
+                                tools.add(dynamicToolInfo);
+                                dynamicToolsCount++;
+                            }
+                        }
+                    } catch (Exception e) {
+                        log.warn("Error getting tools from real client {}: {}", client, e.getMessage());
+                    }
                 }
+                // Skip mock clients - they don't provide real tools
             }
             
             log.info("Total tools: {} ({} static + {} dynamic)", tools.size(), toolCallbacks.length, dynamicToolsCount);
@@ -322,8 +336,21 @@ public class McpServerController {
                 staticToolCount = toolCallbackProvider.getToolCallbacks().length;
             }
             
-            // Calculate dynamic tools (5 per active server)
-            int dynamicToolCount = activeServers.size() * 5;
+            // Calculate dynamic tools (only real tools from actual MCP servers)
+            int dynamicToolCount = 0;
+            var activeClients = mcpServerService.getActiveClients();
+            for (Object client : activeClients.values()) {
+                if (client instanceof com.vijay.service.RealStdioMcpClient) {
+                    try {
+                        List<Object> realTools = ((com.vijay.service.RealStdioMcpClient) client).listTools();
+                        dynamicToolCount += realTools.size();
+                    } catch (Exception e) {
+                        log.warn("Error getting tools from real client {}: {}", client, e.getMessage());
+                    }
+                }
+                // Skip mock clients - they don't provide real tools
+            }
+            
             int totalToolCount = staticToolCount + dynamicToolCount;
             
             status.put("availableTools", totalToolCount);
@@ -350,31 +377,12 @@ public class McpServerController {
         }
     }
     
-    /**
-     * Get tool name by index
-     */
-    private String getToolName(int index) {
-        switch (index) {
-            case 1: return "create_note";
-            case 2: return "list_notes";
-            case 3: return "delete_note";
-            case 4: return "search_notes";
-            case 5: return "execute_code";
-            default: return "dynamic_tool_" + index;
-        }
-    }
     
-    /**
-     * Get tool description by index
-     */
-    private String getToolDescription(int index) {
-        switch (index) {
-            case 1: return "Create a new note";
-            case 2: return "List all notes";
-            case 3: return "Delete a note by ID";
-            case 4: return "Search notes";
-            case 5: return "Execute code";
-            default: return "Dynamic tool " + index;
+    private String findServerIdForClient(Object client) {
+        // Try to find server ID by matching client name or type
+        if (client instanceof com.vijay.service.RealStdioMcpClient) {
+            return ((com.vijay.service.RealStdioMcpClient) client).getName();
         }
+        return "unknown-server";
     }
 }
