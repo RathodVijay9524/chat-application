@@ -1,0 +1,498 @@
+{
+	"info": {
+		"_postman_id": "chat-app-collection",
+		"name": "Chat App API Collection",
+		"description": "Complete API collection for the multi-modal chat application with Spring AI",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Health Check",
+			"item": [
+				{
+					"name": "Test Hello Endpoint",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "http://localhost:8080/api/test/hello",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8080",
+							"path": [
+								"api",
+								"test",
+								"hello"
+							]
+						},
+						"description": "Test basic application health"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Providers",
+			"item": [
+				{
+					"name": "Get All Providers",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "http://localhost:8080/api/chat/providers",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8080",
+							"path": [
+								"api",
+								"chat",
+								"providers"
+							]
+						},
+						"description": "Get list of all available AI providers"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Test Providers",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "http://localhost:8080/api/test/providers",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8080",
+							"path": [
+								"api",
+								"test",
+								"providers"
+							]
+						},
+						"description": "Get test providers endpoint"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Chat Messages",
+			"item": [
+				{
+					"name": "Chat with Ollama (Real AI)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"message\": \"Hello! Can you help me write a simple Python function to calculate factorial?\",\n  \"provider\": \"ollama\",\n  \"model\": \"qwen2.5-coder:7b\",\n  \"conversationId\": \"test-conversation-1\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "http://localhost:8080/api/chat/message",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8080",
+							"path": [
+								"api",
+								"chat",
+								"message"
+							]
+						},
+						"description": "Send message to Ollama (Real AI response)"
+					},
+					"response": []
+				},
+				{
+					"name": "Chat with OpenAI (Mock)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"message\": \"What is machine learning?\",\n  \"provider\": \"openai\",\n  \"model\": \"gpt-3.5-turbo\",\n  \"conversationId\": \"test-conversation-2\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "http://localhost:8080/api/chat/message",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8080",
+							"path": [
+								"api",
+								"chat",
+								"message"
+							]
+						},
+						"description": "Send message to OpenAI (Mock response)"
+					},
+					"response": []
+				},
+				{
+					"name": "Chat with Claude (Mock)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"message\": \"Explain quantum computing in simple terms\",\n  \"provider\": \"claude\",\n  \"model\": \"claude-3-sonnet-20240229\",\n  \"conversationId\": \"test-conversation-3\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "http://localhost:8080/api/chat/message",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8080",
+							"path": [
+								"api",
+								"chat",
+								"message"
+							]
+						},
+						"description": "Send message to Claude (Mock response)"
+					},
+					"response": []
+				},
+				{
+					"name": "Chat with Gemini (Mock)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"message\": \"What are the benefits of renewable energy?\",\n  \"provider\": \"gemini\",\n  \"model\": \"gemini-1.5-flash\",\n  \"conversationId\": \"test-conversation-4\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "http://localhost:8080/api/chat/message",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8080",
+							"path": [
+								"api",
+								"chat",
+								"message"
+							]
+						},
+						"description": "Send message to Gemini (Mock response)"
+					},
+					"response": []
+				},
+				{
+					"name": "Chat with Different Models",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"message\": \"Write a JavaScript function to reverse a string\",\n  \"provider\": \"ollama\",\n  \"model\": \"qwen2.5-coder:3b\",\n  \"conversationId\": \"test-conversation-5\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "http://localhost:8080/api/chat/message",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8080",
+							"path": [
+								"api",
+								"chat",
+								"message"
+							]
+						},
+						"description": "Test different model selection"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "MCP & RAG Testing",
+			"item": [
+				{
+					"name": "Check MCP Status",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "http://localhost:8080/api/mcp/status",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8080",
+							"path": [
+								"api",
+								"mcp",
+								"status"
+							]
+						},
+						"description": "Check MCP server status and availability"
+					},
+					"response": []
+				},
+				{
+					"name": "Check RAG Status",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "http://localhost:8080/api/rag/status",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8080",
+							"path": [
+								"api",
+								"rag",
+								"status"
+							]
+						},
+						"description": "Check RAG system status and configuration"
+					},
+					"response": []
+				},
+				{
+					"name": "Check MCP+RAG Status",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "http://localhost:8080/api/mcp-rag/status",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8080",
+							"path": [
+								"api",
+								"mcp-rag",
+								"status"
+							]
+						},
+						"description": "Check combined MCP and RAG system status"
+					},
+					"response": []
+				},
+				{
+					"name": "Test RAG with OpenAI",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"message\": \"What is machine learning and how does it work?\",\n  \"provider\": \"openai\",\n  \"model\": \"gpt-3.5-turbo\",\n  \"conversationId\": \"rag-test-1\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "http://localhost:8080/api/chat/message",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8080",
+							"path": [
+								"api",
+								"chat",
+								"message"
+							]
+						},
+						"description": "Test RAG-enhanced response with OpenAI"
+					},
+					"response": []
+				},
+				{
+					"name": "Test MCP with Claude",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"message\": \"Explain quantum computing and send to MCP server\",\n  \"provider\": \"claude\",\n  \"model\": \"claude-3-sonnet-20240229\",\n  \"conversationId\": \"mcp-test-1\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "http://localhost:8080/api/chat/message",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8080",
+							"path": [
+								"api",
+								"chat",
+								"message"
+							]
+						},
+						"description": "Test MCP integration with Claude"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Error Testing",
+			"item": [
+				{
+					"name": "Invalid Provider",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"message\": \"Test message\",\n  \"provider\": \"invalid-provider\",\n  \"conversationId\": \"test-error-1\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "http://localhost:8080/api/chat/message",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8080",
+							"path": [
+								"api",
+								"chat",
+								"message"
+							]
+						},
+						"description": "Test error handling with invalid provider"
+					},
+					"response": []
+				},
+				{
+					"name": "Empty Message",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"message\": \"\",\n  \"provider\": \"ollama\",\n  \"conversationId\": \"test-error-2\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "http://localhost:8080/api/chat/message",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8080",
+							"path": [
+								"api",
+								"chat",
+								"message"
+							]
+						},
+						"description": "Test error handling with empty message"
+					},
+					"response": []
+				}
+			]
+		}
+	],
+	"variable": [
+		{
+			"key": "baseUrl",
+			"value": "http://localhost:8080",
+			"type": "string"
+		}
+	]
+}

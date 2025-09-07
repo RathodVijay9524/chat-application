@@ -1,0 +1,462 @@
+{
+  "info": {
+    "name": "Multi-Modal Chat Application API",
+    "description": "Comprehensive API collection for the Multi-Modal Chat Application with Spring AI 1.0.1",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "version": "1.0.0"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "conversation_id",
+      "value": "test-conv-{{$timestamp}}",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Provider Information",
+      "item": [
+        {
+          "name": "Get All Providers",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/chat/providers",
+              "host": ["{{base_url}}"],
+              "path": ["api", "chat", "providers"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get MCP Tools",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/chat/tools",
+              "host": ["{{base_url}}"],
+              "path": ["api", "chat", "tools"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get RAG Status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/chat/rag",
+              "host": ["{{base_url}}"],
+              "path": ["api", "chat", "rag"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Chat Messages",
+      "item": [
+        {
+          "name": "OpenAI Chat",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"What is artificial intelligence?\",\n  \"provider\": \"openai\",\n  \"model\": \"gpt-4o\",\n  \"conversationId\": \"{{conversation_id}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/chat/message",
+              "host": ["{{base_url}}"],
+              "path": ["api", "chat", "message"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Claude Chat",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Explain quantum computing in simple terms\",\n  \"provider\": \"claude\",\n  \"model\": \"claude-3-sonnet-20240229\",\n  \"conversationId\": \"{{conversation_id}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/chat/message",
+              "host": ["{{base_url}}"],
+              "path": ["api", "chat", "message"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Gemini Chat",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Write a Python function to calculate fibonacci numbers\",\n  \"provider\": \"gemini\",\n  \"model\": \"gemini-1.5-pro\",\n  \"conversationId\": \"{{conversation_id}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/chat/message",
+              "host": ["{{base_url}}"],
+              "path": ["api", "chat", "message"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Ollama Chat",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Hello from Ollama!\",\n  \"provider\": \"ollama\",\n  \"model\": \"qwen2.5-coder:7b\",\n  \"conversationId\": \"{{conversation_id}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/chat/message",
+              "host": ["{{base_url}}"],
+              "path": ["api", "chat", "message"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "OpenRouter Chat",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"What are the benefits of using OpenRouter?\",\n  \"provider\": \"openrouter\",\n  \"model\": \"anthropic/claude-3.5-sonnet\",\n  \"conversationId\": \"{{conversation_id}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/chat/message",
+              "host": ["{{base_url}}"],
+              "path": ["api", "chat", "message"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Groq Chat",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Tell me about Groq's inference speed\",\n  \"provider\": \"groq\",\n  \"model\": \"llama3-70b-8192\",\n  \"conversationId\": \"{{conversation_id}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/chat/message",
+              "host": ["{{base_url}}"],
+              "path": ["api", "chat", "message"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Hugging Face Chat",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Hello from Hugging Face!\",\n  \"provider\": \"huggingface\",\n  \"model\": \"microsoft/DialoGPT-medium\",\n  \"conversationId\": \"{{conversation_id}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/chat/message",
+              "host": ["{{base_url}}"],
+              "path": ["api", "chat", "message"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Error Handling Tests",
+      "item": [
+        {
+          "name": "Invalid Provider",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Test message\",\n  \"provider\": \"invalid-provider\",\n  \"conversationId\": \"{{conversation_id}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/chat/message",
+              "host": ["{{base_url}}"],
+              "path": ["api", "chat", "message"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Missing Message",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"provider\": \"openai\",\n  \"conversationId\": \"{{conversation_id}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/chat/message",
+              "host": ["{{base_url}}"],
+              "path": ["api", "chat", "message"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Invalid Model",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Test message\",\n  \"provider\": \"openai\",\n  \"model\": \"invalid-model\",\n  \"conversationId\": \"{{conversation_id}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/chat/message",
+              "host": ["{{base_url}}"],
+              "path": ["api", "chat", "message"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Advanced Tests",
+      "item": [
+        {
+          "name": "Code Generation Test",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Write a Spring Boot REST controller for user management with CRUD operations\",\n  \"provider\": \"openai\",\n  \"model\": \"gpt-4o\",\n  \"conversationId\": \"{{conversation_id}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/chat/message",
+              "host": ["{{base_url}}"],
+              "path": ["api", "chat", "message"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Multi-turn Conversation",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"What is Spring AI?\",\n  \"provider\": \"claude\",\n  \"model\": \"claude-3-sonnet-20240229\",\n  \"conversationId\": \"multi-turn-{{$timestamp}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/chat/message",
+              "host": ["{{base_url}}"],
+              "path": ["api", "chat", "message"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Follow-up Question",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"How does it compare to LangChain?\",\n  \"provider\": \"claude\",\n  \"model\": \"claude-3-sonnet-20240229\",\n  \"conversationId\": \"multi-turn-{{$timestamp}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/chat/message",
+              "host": ["{{base_url}}"],
+              "path": ["api", "chat", "message"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Performance Test",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Generate a comprehensive analysis of the current state of artificial intelligence, including recent developments, challenges, and future prospects. Include details about machine learning, deep learning, natural language processing, computer vision, and emerging technologies like AGI and quantum computing.\",\n  \"provider\": \"groq\",\n  \"model\": \"llama3-70b-8192\",\n  \"conversationId\": \"perf-test-{{$timestamp}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/chat/message",
+              "host": ["{{base_url}}"],
+              "path": ["api", "chat", "message"]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Set conversation ID with timestamp if not already set",
+          "if (!pm.collectionVariables.get('conversation_id')) {",
+          "    pm.collectionVariables.set('conversation_id', 'conv-' + Date.now());",
+          "}"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Basic response validation",
+          "pm.test('Response status code is 200', function () {",
+          "    pm.response.to.have.status(200);",
+          "});",
+          "",
+          "// For chat message endpoints",
+          "if (pm.request.url.path.includes('message')) {",
+          "    pm.test('Response has required fields', function () {",
+          "        const jsonData = pm.response.json();",
+          "        pm.expect(jsonData).to.have.property('response');",
+          "        pm.expect(jsonData).to.have.property('provider');",
+          "        pm.expect(jsonData).to.have.property('timestamp');",
+          "    });",
+          "    ",
+          "    pm.test('Response time is reasonable', function () {",
+          "        pm.expect(pm.response.responseTime).to.be.below(30000); // 30 seconds max",
+          "    });",
+          "}",
+          "",
+          "// For provider endpoints",
+          "if (pm.request.url.path.includes('providers')) {",
+          "    pm.test('Response is an array', function () {",
+          "        pm.expect(pm.response.json()).to.be.an('array');",
+          "    });",
+          "    ",
+          "    pm.test('Each provider has required fields', function () {",
+          "        const providers = pm.response.json();",
+          "        providers.forEach(provider => {",
+          "            pm.expect(provider).to.have.property('name');",
+          "            pm.expect(provider).to.have.property('displayName');",
+          "            pm.expect(provider).to.have.property('availableModels');",
+          "            pm.expect(provider).to.have.property('isAvailable');",
+          "        });",
+          "    });",
+          "}"
+        ]
+      }
+    }
+  ]
+}
+
