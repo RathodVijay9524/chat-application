@@ -9,8 +9,10 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @Slf4j
 @RestController
@@ -329,21 +331,40 @@ public class McpServerController {
             status.put("activeServers", activeServers.size());
             status.put("serverStatus", serverStatus);
             
-            // Get tool count (static + dynamic)
+            // Get tool count with de-duplication to avoid double-counting
             var toolCallbackProvider = mcpServerService.getToolCallbackProvider();
             int staticToolCount = 0;
+            Set<String> knownToolNames = new HashSet<>();
             if (toolCallbackProvider != null) {
-                staticToolCount = toolCallbackProvider.getToolCallbacks().length;
+                var callbacks = toolCallbackProvider.getToolCallbacks();
+                staticToolCount = callbacks.length; // Note: may already include dynamic tools injected into provider
+                for (var cb : callbacks) {
+                    try {
+                        knownToolNames.add(cb.getToolDefinition().name());
+                    } catch (Exception ignored) {
+                        // ignore any malformed definitions
+                    }
+                }
             }
             
-            // Calculate dynamic tools (only real tools from actual MCP servers)
+            // Calculate additional dynamic tools that are NOT already present in the callback provider
             int dynamicToolCount = 0;
             var activeClients = mcpServerService.getActiveClients();
             for (Object client : activeClients.values()) {
                 if (client instanceof com.vijay.service.RealStdioMcpClient) {
                     try {
                         List<Object> realTools = ((com.vijay.service.RealStdioMcpClient) client).listTools();
-                        dynamicToolCount += realTools.size();
+                        for (Object tool : realTools) {
+                            if (tool instanceof Map<?, ?> toolMap) {
+                                Object nameObj = toolMap.get("name");
+                                if (nameObj instanceof String name && !name.isBlank()) {
+                                    if (!knownToolNames.contains(name)) {
+                                        knownToolNames.add(name);
+                                        dynamicToolCount++;
+                                    }
+                                }
+                            }
+                        }
                     } catch (Exception e) {
                         log.warn("Error getting tools from real client {}: {}", client, e.getMessage());
                     }
@@ -351,10 +372,10 @@ public class McpServerController {
                 // Skip mock clients - they don't provide real tools
             }
             
-            int totalToolCount = staticToolCount + dynamicToolCount;
+            int totalToolCount = knownToolNames.size();
             
             status.put("availableTools", totalToolCount);
-            status.put("staticTools", staticToolCount);
+            status.put("staticTools", Math.max(0, totalToolCount - dynamicToolCount));
             status.put("dynamicTools", dynamicToolCount);
             
             // Injection status

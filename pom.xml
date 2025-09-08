@@ -100,6 +100,20 @@
 			<groupId>jakarta.annotation</groupId>
 			<artifactId>jakarta.annotation-api</artifactId>
 		</dependency>
+
+		<!-- MCP Java SDK for creating transports and clients dynamically -->
+		<!--
+		<dependency>
+			<groupId>io.modelcontextprotocol.sdk</groupId>
+			<artifactId>mcp</artifactId>
+			<version>0.11.3</version>
+		</dependency>
+		<dependency>
+			<groupId>io.modelcontextprotocol.sdk</groupId>
+			<artifactId>mcp-spring-webflux</artifactId>
+			<version>0.11.3</version>
+		</dependency>
+		-->
 	</dependencies>
 	
 	<dependencyManagement>

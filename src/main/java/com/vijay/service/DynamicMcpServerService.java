@@ -4,13 +4,18 @@ import com.vijay.dto.McpServerConfig;
 import com.vijay.entity.McpServerEntity;
 import com.vijay.repository.McpServerRepository;
 import io.modelcontextprotocol.client.McpSyncClient;
+import com.vijay.mcp.DynamicToolCallback;
+
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.mcp.SyncMcpToolCallbackProvider;
 import org.springframework.ai.tool.ToolCallbackProvider;
+import org.springframework.ai.tool.ToolCallback;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.reactive.function.client.WebClient;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -36,7 +41,7 @@ public class DynamicMcpServerService {
     private McpServerRepository serverRepository;
     
     public DynamicMcpServerService() {
-        log.info("🔧 Dynamic MCP Server Service initialized with MySQL database persistence");
+        log.info(" Dynamic MCP Server Service initialized with MySQL database persistence");
     }
     
     /**
@@ -46,7 +51,7 @@ public class DynamicMcpServerService {
     @Transactional
     public void loadServersFromDatabase() {
         try {
-            log.info("🔄 Loading MCP servers from MySQL database...");
+            log.info(" Loading MCP servers from MySQL database...");
             
             List<McpServerEntity> entities = serverRepository.findAll();
             log.info("Found {} servers in database", entities.size());
@@ -70,19 +75,19 @@ public class DynamicMcpServerService {
                     );
                     
                     if (configAdded) {
-                        log.info("✅ Loaded server from database: {} (type: {})", config.getName(), config.getTransportType());
+                        log.info(" Loaded server from database: {} (type: {})", config.getName(), config.getTransportType());
                         
                         // Auto-start if enabled and was running before
                         if (config.isEnabled() && entity.getStatus() == McpServerEntity.ServerStatus.RUNNING) {
                             boolean started = startServer(config.getId());
                             if (started) {
-                                log.info("✅ Auto-started server: {}", config.getName());
+                                log.info(" Auto-started server: {}", config.getName());
                             } else {
-                                log.warn("⚠️ Failed to auto-start server: {}", config.getName());
+                                log.warn(" Failed to auto-start server: {}", config.getName());
                             }
                         }
                     } else {
-                        log.warn("⚠️ Failed to load server configuration: {}", config.getName());
+                        log.warn(" Failed to load server configuration: {}", config.getName());
                     }
                     
                 } catch (Exception e) {
@@ -90,7 +95,7 @@ public class DynamicMcpServerService {
                 }
             }
             
-            log.info("✅ Loaded {} servers from database", serverConfigs.size());
+            log.info(" Loaded {} servers from database", serverConfigs.size());
             updateToolCallbackProvider();
             
         } catch (Exception e) {
@@ -129,11 +134,11 @@ public class DynamicMcpServerService {
             // Convert to entity and save to database
             McpServerEntity entity = McpServerEntity.fromDto(config);
             serverRepository.save(entity);
-            log.info("✅ Server configuration saved to MySQL database: {} (ID: {})", config.getName(), config.getId());
+            log.info(" Server configuration saved to MySQL database: {} (ID: {})", config.getName(), config.getId());
             
             // Store configuration in memory
             serverConfigs.put(config.getId(), config);
-            log.info("✅ Server configuration stored in memory: {} (total configs: {})", config.getId(), serverConfigs.size());
+            log.info(" Server configuration stored in memory: {} (total configs: {})", config.getId(), serverConfigs.size());
             
             // Add to dynamic configuration service for Spring AI integration
             boolean configAdded = dynamicConfigService.addDynamicMcpServer(
@@ -143,20 +148,20 @@ public class DynamicMcpServerService {
             );
             
             if (configAdded) {
-                log.info("✅ Dynamic MCP server configuration added to Spring AI: {}", config.getId());
+                log.info(" Dynamic MCP server configuration added to Spring AI: {}", config.getId());
             } else {
-                log.warn("⚠️ Failed to add dynamic MCP server configuration to Spring AI: {}", config.getId());
+                log.warn(" Failed to add dynamic MCP server configuration to Spring AI: {}", config.getId());
             }
             
             // Start server if enabled
             if (config.isEnabled()) {
                 boolean started = startServer(config.getId());
                 if (started) {
-                    log.info("✅ MCP server started successfully: {}", config.getName());
+                    log.info(" MCP server started successfully: {}", config.getName());
                     updateToolCallbackProvider();
                     return true;
                 } else {
-                    log.error("❌ Failed to start MCP server: {}", config.getName());
+                    log.error(" Failed to start MCP server: {}", config.getName());
                     return false;
                 }
             }
@@ -191,7 +196,7 @@ public class DynamicMcpServerService {
             if (client != null) {
                 activeClients.put(serverId, client);
                 updateToolCallbackProvider();
-                log.info("✅ MCP server started successfully: {}", config.getName());
+                log.info(" MCP server started successfully: {}", config.getName());
                 return true;
             }
             
@@ -216,7 +221,7 @@ public class DynamicMcpServerService {
                     ((RealStdioMcpClient) client).disconnect();
                 }
                 updateToolCallbackProvider();
-                log.info("✅ MCP server stopped: {}", serverId);
+                log.info(" MCP server stopped: {}", serverId);
                 return true;
             }
             
@@ -239,21 +244,21 @@ public class DynamicMcpServerService {
             // Remove from dynamic configuration service
             boolean configRemoved = dynamicConfigService.removeDynamicMcpServer(serverId);
             if (configRemoved) {
-                log.info("✅ Dynamic MCP server configuration removed from Spring AI: {}", serverId);
+                log.info(" Dynamic MCP server configuration removed from Spring AI: {}", serverId);
             } else {
-                log.warn("⚠️ Failed to remove dynamic MCP server configuration from Spring AI: {}", serverId);
+                log.warn(" Failed to remove dynamic MCP server configuration from Spring AI: {}", serverId);
             }
             
             // Remove configuration from database
             if (serverRepository.existsById(serverId)) {
                 serverRepository.deleteById(serverId);
-                log.info("✅ MCP server configuration removed from database: {}", serverId);
+                log.info(" MCP server configuration removed from database: {}", serverId);
             }
             
             // Remove configuration from memory
             McpServerConfig removed = serverConfigs.remove(serverId);
             if (removed != null) {
-                log.info("✅ MCP server configuration removed from memory: {}", removed.getName());
+                log.info(" MCP server configuration removed from memory: {}", removed.getName());
                 return true;
             }
             
@@ -324,7 +329,7 @@ public class DynamicMcpServerService {
         this.staticClients.clear();
         if (clients != null) {
             this.staticClients.addAll(clients);
-            log.info("✅ Set {} static MCP clients", clients.size());
+            log.info(" Set {} static MCP clients", clients.size());
             
             // Convert static clients to server configs for display
             for (int i = 0; i < clients.size(); i++) {
@@ -340,7 +345,7 @@ public class DynamicMcpServerService {
                 serverConfigs.put(config.getId(), config);
             }
             
-            log.info("✅ Converted {} static clients to server configs", clients.size());
+            log.info(" Converted {} static clients to server configs", clients.size());
         }
         updateToolCallbackProvider();
     }
@@ -438,7 +443,7 @@ public class DynamicMcpServerService {
                         Object realClient = createRealStdioClient(processBuilder, config.getName());
                         
                         if (realClient != null) {
-                            log.info("✅ Real STDIO MCP client created successfully for: {}", config.getName());
+                            log.info(" Real STDIO MCP client created successfully for: {}", config.getName());
                             log.info("Command: {}", commandList);
                             log.info("Working Directory: {}", workingDirectory);
                             log.info("Environment: {}", environment);
@@ -590,19 +595,26 @@ public class DynamicMcpServerService {
     private Object createRealStdioClient(ProcessBuilder processBuilder, String name) {
         try {
             log.info("Creating real STDIO MCP client for: {}", name);
-            
-            // Start the process
-            Process process = processBuilder.start();
-            log.info("Started STDIO process for: {} (PID: {})", name, process.pid());
-            
-            // Store process for cleanup
-            String serverId = findServerIdByName(name);
-            if (serverId != null) {
-                activeProcesses.put(serverId, process);
+
+            // Ensure command is configured
+            List<String> cmd = processBuilder.command();
+            if (cmd == null || cmd.isEmpty()) {
+                log.error("ProcessBuilder has no command configured for {}", name);
+                return null;
             }
-            
-            // Create a real STDIO MCP client
-            return new RealStdioMcpClient(name, process);
+
+            // Start the process directly without MCP SDK
+            Process process = processBuilder.start();
+            log.info("Started STDIO process for '{}' with PID {} and command {}", name, process.pid(), cmd);
+
+            // Wrap the process in our RealStdioMcpClient abstraction
+            RealStdioMcpClient client = new RealStdioMcpClient(name, process);
+            try {
+                client.connect();
+            } catch (IOException e) {
+                log.warn("Process for '{}' started but connect verification failed: {}", name, e.getMessage());
+            }
+            return client;
             
         } catch (Exception e) {
             log.error("Error in createRealStdioClient for {}: {}", name, e.getMessage(), e);
@@ -847,43 +859,57 @@ public class DynamicMcpServerService {
             // Create the base tool callback provider with static clients
             SyncMcpToolCallbackProvider baseProvider = new SyncMcpToolCallbackProvider(staticClients);
             
-            // Count real tools from RealStdioMcpClient instances
+            // Build a combined list of ToolCallbacks: static (via base) + dynamic (via RealStdioMcpClient)
+            List<ToolCallback> combined = new ArrayList<>();
+            combined.addAll(Arrays.asList(baseProvider.getToolCallbacks()));
+
+            ObjectMapper mapper = new ObjectMapper();
+
             int realDynamicToolsCount = 0;
             for (Object client : activeClients.values()) {
                 if (client instanceof RealStdioMcpClient) {
+                    RealStdioMcpClient real = (RealStdioMcpClient) client;
                     try {
-                        List<Object> tools = ((RealStdioMcpClient) client).listTools();
-                        realDynamicToolsCount += tools.size();
-                        log.info("Real STDIO client {} provides {} tools", 
-                                ((RealStdioMcpClient) client).getName(), tools.size());
+                        List<Object> tools = real.listTools();
+                        for (Object t : tools) {
+                            if (t instanceof Map) {
+                                @SuppressWarnings("unchecked")
+                                Map<String, Object> tm = (Map<String, Object>) t;
+                                String toolName = String.valueOf(tm.getOrDefault("name", "dynamic_tool"));
+                                String description = (String) tm.getOrDefault("description", "Dynamic tool");
+                                Object inputSchema = tm.get("inputSchema");
+                                String inputSchemaJson = null;
+                                try {
+                                    if (inputSchema != null) {
+                                        inputSchemaJson = mapper.writeValueAsString(inputSchema);
+                                    }
+                                } catch (Exception ignored) {}
+
+                                combined.add(new DynamicToolCallback(toolName, description, inputSchemaJson, real, toolName));
+                                realDynamicToolsCount++;
+                            }
+                        }
+                        log.info("Real STDIO client {} provides {} tools (added to callbacks)", 
+                                real.getName(), tools.size());
                     } catch (Exception e) {
                         log.warn("Error getting tools from real STDIO client {}: {}", 
-                                ((RealStdioMcpClient) client).getName(), e.getMessage());
+                                real.getName(), e.getMessage());
                     }
                 }
             }
-            
-            // Count mock tools (for non-real clients)
-            int mockToolsCount = 0;
-            for (Object client : activeClients.values()) {
-                if (!(client instanceof RealStdioMcpClient) && !(client instanceof McpSyncClient)) {
-                    mockToolsCount += 5; // 5 tools per mock server
+
+            log.info("Created tool callback provider with {} static callbacks and {} dynamic callbacks", 
+                    baseProvider.getToolCallbacks().length, realDynamicToolsCount);
+
+            final ToolCallback[] callbacksArray = combined.toArray(new ToolCallback[0]);
+
+            // Return a simple provider that serves the combined tool callbacks
+            return new ToolCallbackProvider() {
+                @Override
+                public ToolCallback[] getToolCallbacks() {
+                    return callbacksArray;
                 }
-            }
-            
-            int totalDynamicTools = realDynamicToolsCount + mockToolsCount;
-            
-            log.info("Created tool callback provider with {} static clients", staticClients.size());
-            log.info("Active dynamic clients: {} ({} real tools + {} mock tools = {} total dynamic)", 
-                    activeClients.keySet(), realDynamicToolsCount, mockToolsCount, totalDynamicTools);
-            log.info("Total tools available: {} ({} static + {} dynamic)", 
-                    baseProvider.getToolCallbacks().length + totalDynamicTools, 
-                    baseProvider.getToolCallbacks().length, 
-                    totalDynamicTools);
-            
-            // For now, return the base provider
-            // TODO: Implement proper dynamic tool injection
-            return baseProvider;
+            };
             
         } catch (Exception e) {
             log.error("Error creating enhanced tool callback provider: {}", e.getMessage(), e);

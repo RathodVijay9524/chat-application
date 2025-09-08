@@ -42,16 +42,18 @@ public class AIProviderConfig {
         // Initialize dynamic service with static clients
         dynamicMcpServerService.setStaticClients(mcpSyncClients);
         
-        // Get the combined tool callback provider from dynamic service
-        ToolCallbackProvider provider = dynamicMcpServerService.getToolCallbackProvider();
-        
-        if (provider == null) {
-            logger.info("No MCP clients available, creating empty tool callback provider");
-            return new SyncMcpToolCallbackProvider(List.of());
-        }
-        
-        logger.info("Created MCP Tool Callback Provider with dynamic server management");
-        return provider;
+        // Return a delegating provider that always reflects the latest dynamic state
+        logger.info("Creating delegating MCP Tool Callback Provider (dynamic runtime updates)");
+        return new ToolCallbackProvider() {
+            @Override
+            public org.springframework.ai.tool.ToolCallback[] getToolCallbacks() {
+                ToolCallbackProvider current = dynamicMcpServerService.getToolCallbackProvider();
+                if (current == null) {
+                    return new SyncMcpToolCallbackProvider(List.of()).getToolCallbacks();
+                }
+                return current.getToolCallbacks();
+            }
+        };
     }
 
     // Chat Memory for conversation context
@@ -75,7 +77,7 @@ public class AIProviderConfig {
         logger.info("Creating OpenAI Chat Client with MCP tools");
         return ChatClient.builder(openAiChatModel)
                 .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
-                .defaultToolCallbacks(mcp.getToolCallbacks())
+                .defaultToolCallbacks(mcp)
                 .build();
     }
 
@@ -86,7 +88,7 @@ public class AIProviderConfig {
         logger.info("Creating Anthropic Chat Client with MCP tools");
         return ChatClient.builder(anthropicChatModel)
                 .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
-                .defaultToolCallbacks(mcp.getToolCallbacks())
+                .defaultToolCallbacks(mcp)
                 .build();
     }
 
@@ -100,7 +102,7 @@ public class AIProviderConfig {
         // We'll use OpenAI model as a placeholder since we need a ChatModel
         return ChatClient.builder(openAiChatModel)
                 .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
-                .defaultToolCallbacks(mcp.getToolCallbacks())
+                .defaultToolCallbacks(mcp)
                 .build();
     }
     
@@ -112,7 +114,7 @@ public class AIProviderConfig {
         // We'll use OpenAI model as a placeholder since we need a ChatModel
         return ChatClient.builder(openAiChatModel)
                 .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
-                .defaultToolCallbacks(mcp.getToolCallbacks())
+                .defaultToolCallbacks(mcp)
                 .build();
     }
     
@@ -124,7 +126,7 @@ public class AIProviderConfig {
         // We'll use OpenAI model as a placeholder since we need a ChatModel
         return ChatClient.builder(openAiChatModel)
                 .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
-                .defaultToolCallbacks(mcp.getToolCallbacks())
+                .defaultToolCallbacks(mcp)
                 .build();
     }
 
@@ -135,7 +137,7 @@ public class AIProviderConfig {
         logger.info("Creating Ollama Chat Client with MCP tools");
         return ChatClient.builder(ollamaChatModel)
                 .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
-                .defaultToolCallbacks(mcp.getToolCallbacks())
+                .defaultToolCallbacks(mcp)
                 .build();
     }
 
@@ -147,7 +149,7 @@ public class AIProviderConfig {
         // We'll use OpenAI model as a placeholder since we need a ChatModel
         return ChatClient.builder(openAiChatModel)
                 .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
-                .defaultToolCallbacks(mcp.getToolCallbacks())
+                .defaultToolCallbacks(mcp)
                 .build();
     }
 }
