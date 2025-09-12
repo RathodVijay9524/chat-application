@@ -32,10 +32,10 @@ public class Conversation {
     @Column(nullable = false)
     private String userId;
     
-    @Column(nullable = false)
+    @Column(nullable = false, length = 100)
     private String provider;
     
-    @Column(nullable = false)
+    @Column(nullable = false, length = 500)
     private String model;
     
     @Column

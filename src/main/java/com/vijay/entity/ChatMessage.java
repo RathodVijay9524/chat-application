@@ -36,10 +36,10 @@ public class ChatMessage {
     @Column(columnDefinition = "TEXT")
     private String aiResponse;
     
-    @Column(nullable = false)
+    @Column(nullable = false, length = 100)
     private String provider;
     
-    @Column(nullable = false)
+    @Column(nullable = false, length = 500)
     private String model;
     
     @Column
