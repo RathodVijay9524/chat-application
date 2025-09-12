@@ -17,7 +17,13 @@ import java.util.Set;
 @Slf4j
 @RestController
 @RequestMapping("/api/mcp-servers")
-@CrossOrigin(origins = {"http://localhost:3000", "http://localhost:3001"})
+@CrossOrigin(
+        origins = {"http://localhost:5173", "http://localhost:3000"},
+        allowedHeaders = "*",
+        allowCredentials = "true",
+        methods = {RequestMethod.GET, RequestMethod.POST, RequestMethod.PUT,
+                RequestMethod.DELETE, RequestMethod.OPTIONS, RequestMethod.HEAD}
+)
 public class McpServerController {
     
     @Autowired
@@ -240,16 +246,16 @@ public class McpServerController {
             var toolCallbackProvider = mcpServerService.getToolCallbackProvider();
             if (toolCallbackProvider == null) {
                 return ResponseEntity.ok(Map.of(
-                    "status", "no_tools",
-                    "message", "No MCP tool callback provider available",
-                    "tools", List.of(),
-                    "count", 0
+                        "status", "no_tools",
+                        "message", "No MCP tool callback provider available",
+                        "tools", List.of(),
+                        "count", 0
                 ));
             }
-            
+
             var toolCallbacks = toolCallbackProvider.getToolCallbacks();
             List<Map<String, Object>> tools = new ArrayList<>();
-            
+
             // Add static tools
             for (var toolCallback : toolCallbacks) {
                 Map<String, Object> toolInfo = new HashMap<>();
@@ -258,17 +264,26 @@ public class McpServerController {
                 toolInfo.put("type", "MCP_TOOL");
                 tools.add(toolInfo);
             }
-            
-            // Add dynamic tools (real and simulated)
+
+            // Add dynamic tools
             List<String> activeServers = mcpServerService.getActiveServers();
             int dynamicToolsCount = 0;
-            
-            // Get real tools from active servers
+            int dynamicTimeouts = 0;
+
             var activeClients = mcpServerService.getActiveClients();
             for (Object client : activeClients.values()) {
                 if (client instanceof com.vijay.service.RealStdioMcpClient) {
                     try {
-                        List<Object> realTools = ((com.vijay.service.RealStdioMcpClient) client).listTools();
+                        java.util.concurrent.CompletableFuture<java.util.List<Object>> fut =
+                                java.util.concurrent.CompletableFuture.supplyAsync(((com.vijay.service.RealStdioMcpClient) client)::listTools);
+                        java.util.List<Object> realTools;
+                        try {
+                            realTools = fut.get(10, java.util.concurrent.TimeUnit.SECONDS);
+                        } catch (java.util.concurrent.TimeoutException te) {
+                            fut.cancel(true);
+                            dynamicTimeouts++;
+                            continue;
+                        }
                         for (Object tool : realTools) {
                             if (tool instanceof Map) {
                                 @SuppressWarnings("unchecked")
@@ -287,30 +302,29 @@ public class McpServerController {
                         log.warn("Error getting tools from real client {}: {}", client, e.getMessage());
                     }
                 }
-                // Skip mock clients - they don't provide real tools
             }
-            
+
             log.info("Total tools: {} ({} static + {} dynamic)", tools.size(), toolCallbacks.length, dynamicToolsCount);
-            
+
             return ResponseEntity.ok(Map.of(
-                "status", "success",
-                "message", "Tools available to AI models",
-                "tools", tools,
-                "count", tools.size(),
-                "staticTools", toolCallbacks.length,
-                "dynamicTools", dynamicToolsCount,
-                "note", dynamicToolsCount > 0 ? "Static and dynamic tools are injected into all AI models!" : "Only static tools are available",
-                "dynamicServers", activeServers.size(),
-                "injectionStatus", dynamicToolsCount > 0 ? "Dynamic tools are now available to AI models!" : "No dynamic servers active"
+                    "status", "success",
+                    "message", "Tools available to AI models",
+                    "tools", tools,
+                    "count", tools.size(),
+                    "staticTools", toolCallbacks.length,
+                    "dynamicTools", dynamicToolsCount,
+                    "dynamicTimeouts", dynamicTimeouts,
+                    "note", dynamicToolsCount > 0 ? "Static and dynamic tools are injected into all AI models!" : "Only static tools are available",
+                    "dynamicServers", activeServers.size(),
+                    "injectionStatus", dynamicToolsCount > 0 ? "Dynamic tools are now available to AI models!" : "No dynamic servers active"
             ));
-            
         } catch (Exception e) {
             log.error("Error retrieving AI tools: {}", e.getMessage(), e);
             return ResponseEntity.internalServerError().body(Map.of(
-                "status", "error",
-                "message", "Error retrieving AI tools: " + e.getMessage(),
-                "tools", List.of(),
-                "count", 0
+                    "status", "error",
+                    "message", "Error retrieving AI tools: " + e.getMessage(),
+                    "tools", List.of(),
+                    "count", 0
             ));
         }
     }
@@ -349,11 +363,21 @@ public class McpServerController {
             
             // Calculate additional dynamic tools that are NOT already present in the callback provider
             int dynamicToolCount = 0;
+            int dynamicTimeouts = 0;
             var activeClients = mcpServerService.getActiveClients();
             for (Object client : activeClients.values()) {
                 if (client instanceof com.vijay.service.RealStdioMcpClient) {
                     try {
-                        List<Object> realTools = ((com.vijay.service.RealStdioMcpClient) client).listTools();
+                        java.util.concurrent.CompletableFuture<java.util.List<Object>> fut =
+                                java.util.concurrent.CompletableFuture.supplyAsync(((com.vijay.service.RealStdioMcpClient) client)::listTools);
+                        java.util.List<Object> realTools;
+                        try {
+                            realTools = fut.get(10, java.util.concurrent.TimeUnit.SECONDS);
+                        } catch (java.util.concurrent.TimeoutException te) {
+                            fut.cancel(true);
+                            dynamicTimeouts++;
+                            continue;
+                        }
                         for (Object tool : realTools) {
                             if (tool instanceof Map<?, ?> toolMap) {
                                 Object nameObj = toolMap.get("name");
@@ -377,6 +401,7 @@ public class McpServerController {
             status.put("availableTools", totalToolCount);
             status.put("staticTools", Math.max(0, totalToolCount - dynamicToolCount));
             status.put("dynamicTools", dynamicToolCount);
+            status.put("dynamicTimeouts", dynamicTimeouts);
             
             // Injection status
             if (dynamicToolCount > 0) {
@@ -398,6 +423,64 @@ public class McpServerController {
         }
     }
     
+    /**
+     * Manually trigger tools/list against a running STDIO MCP server by serverId.
+     * This is useful for testing from Postman.
+     * Example: GET /api/mcp-servers/stdio/{serverId}/tools
+     */
+    @GetMapping("/stdio/{serverId}/tools")
+    public ResponseEntity<Map<String, Object>> stdioListTools(@PathVariable String serverId) {
+        try {
+            var active = mcpServerService.getActiveClients();
+            Object client = active.get(serverId);
+            if (client == null) {
+                return ResponseEntity.badRequest().body(Map.of(
+                        "status", "error",
+                        "message", "No active client found for serverId: " + serverId,
+                        "serverId", serverId
+                ));
+            }
+            if (!(client instanceof com.vijay.service.RealStdioMcpClient)) {
+                return ResponseEntity.badRequest().body(Map.of(
+                        "status", "error",
+                        "message", "Client for serverId is not a STDIO client",
+                        "serverId", serverId,
+                        "clientType", client.getClass().getName()
+                ));
+            }
+
+            com.vijay.service.RealStdioMcpClient stdio = (com.vijay.service.RealStdioMcpClient) client;
+            java.util.concurrent.CompletableFuture<java.util.List<Object>> fut =
+                    java.util.concurrent.CompletableFuture.supplyAsync(stdio::listTools);
+            java.util.List<Object> tools;
+            try {
+                tools = fut.get(10, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (java.util.concurrent.TimeoutException te) {
+                fut.cancel(true);
+                return ResponseEntity.ok(Map.of(
+                        "status", "timeout",
+                        "message", "Timed out waiting for tools/list response from STDIO server",
+                        "serverId", serverId,
+                        "serverName", stdio.getName(),
+                        "count", 0,
+                        "tools", java.util.List.of()
+                ));
+            }
+
+            return ResponseEntity.ok(Map.of(
+                    "status", "success",
+                    "serverId", serverId,
+                    "serverName", stdio.getName(),
+                    "count", tools != null ? tools.size() : 0,
+                    "tools", tools
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of(
+                    "status", "error",
+                    "message", e.getMessage()
+            ));
+        }
+    }
     
     private String findServerIdForClient(Object client) {
         // Try to find server ID by matching client name or type

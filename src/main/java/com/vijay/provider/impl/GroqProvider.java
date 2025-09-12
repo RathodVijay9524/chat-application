@@ -5,6 +5,7 @@ import com.vijay.dto.ChatResponse;
 import com.vijay.dto.ProviderInfo;
 import com.vijay.provider.AIProvider;
 import com.vijay.service.DynamicApiKeyService;
+import com.vijay.service.DynamicChatClientService;
 import com.vijay.service.RAGService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
@@ -12,11 +13,14 @@ import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 
 @Slf4j
 @Component
@@ -24,17 +28,20 @@ public class GroqProvider implements AIProvider {
 
     private final String defaultApiKey;
     private final DynamicApiKeyService dynamicApiKeyService;
+    private final DynamicChatClientService dynamicChatClientService;
     private final RAGService ragService;
     private final ChatClient chatClient;
     private final ToolCallbackProvider toolCallbackProvider;
 
     public GroqProvider(@Value("${groq.api-key:}") String apiKey,
                        DynamicApiKeyService dynamicApiKeyService,
+                       DynamicChatClientService dynamicChatClientService,
                        RAGService ragService,
                        @Qualifier("groqChatClient") ChatClient chatClient,
                        ToolCallbackProvider toolCallbackProvider) {
         this.defaultApiKey = apiKey != null ? apiKey : "";
         this.dynamicApiKeyService = dynamicApiKeyService;
+        this.dynamicChatClientService = dynamicChatClientService;
         this.ragService = ragService;
         this.chatClient = chatClient;
         this.toolCallbackProvider = toolCallbackProvider;
@@ -71,6 +78,12 @@ public class GroqProvider implements AIProvider {
                 model = "llama-3.1-8b-instant";
             }
             
+            // Additional validation for known problematic models
+            if (model.equals("llama-2-13b-chat")) {
+                log.warn("Model 'llama-2-13b-chat' is deprecated, using default: llama-3.1-8b-instant");
+                model = "llama-3.1-8b-instant";
+            }
+            
             // Generate RAG context
             String ragContext = ragService.generateRAGContext(request.getMessage());
             
@@ -91,12 +104,60 @@ public class GroqProvider implements AIProvider {
             String toolInfo = getMCPToolInfo();
             String enhancedSystemMessage = systemMessage + "\n\nAvailable MCP Tools (" + mcpToolCount + "):\n" + toolInfo;
             
-            // Use ChatClient for memory management and MCP tools
-            String response = chatClient.prompt()
-                    .system(enhancedSystemMessage)
-                    .user(enhancedPrompt)
-                    .call()
-                    .content();
+            // Use dynamic WebClient with the API key from frontend for API calls
+            WebClient dynamicWebClient = dynamicChatClientService.createGroqWebClient(request);
+            
+            // Create the request payload for Groq API (OpenAI-compatible)
+            Map<String, Object> requestBody = Map.of(
+                "model", request.getModel() != null ? request.getModel() : "llama-3.1-8b-instant",
+                "messages", List.of(
+                    Map.of("role", "system", "content", enhancedSystemMessage),
+                    Map.of("role", "user", "content", enhancedPrompt)
+                ),
+                "temperature", request.getTemperature() != null ? request.getTemperature() : 0.7,
+                "max_tokens", request.getMaxTokens() != null ? request.getMaxTokens() : 1000
+            );
+            
+            // Debug logging
+            System.out.println("🔍 Groq API Debug:");
+            System.out.println("   API Key: " + (apiKey != null && !apiKey.isEmpty() ? apiKey.substring(0, Math.min(8, apiKey.length())) + "..." : "NOT SET"));
+            System.out.println("   API Key Length: " + (apiKey != null ? apiKey.length() : 0));
+            System.out.println("   Key Source: " + (dynamicApiKeyService.hasValidApiKey("groq", request) ? "DYNAMIC (from frontend)" : "DEFAULT (from environment)"));
+            System.out.println("   Model: " + model);
+            System.out.println("   Request Body: " + requestBody);
+            System.out.println("   Full API Key: " + apiKey);
+            
+            // Make API call with dynamic API key
+            String response;
+            try {
+                response = dynamicWebClient.post()
+                        .uri("/chat/completions")
+                        .bodyValue(requestBody)
+                        .retrieve()
+                        .bodyToMono(Map.class)
+                        .map(responseMap -> {
+                            // Extract the response text from Groq API response
+                            List<Map<String, Object>> choices = (List<Map<String, Object>>) responseMap.get("choices");
+                            Map<String, Object> message = (Map<String, Object>) choices.get(0).get("message");
+                            return (String) message.get("content");
+                        })
+                        .block();
+            } catch (WebClientResponseException e) {
+                System.out.println("❌ Groq API Error Details:");
+                System.out.println("   Error: " + e.getStatusCode() + " " + e.getStatusText() + " from " + e.getRequest().getURI());
+                System.out.println("   API Key Used: " + (apiKey != null && !apiKey.isEmpty() ? apiKey.substring(0, Math.min(8, apiKey.length())) + "..." : "NOT SET"));
+                System.out.println("   Key Source: " + (dynamicApiKeyService.hasValidApiKey("groq", request) ? "DYNAMIC (from frontend)" : "DEFAULT (from environment)"));
+                System.out.println("   Response Body: " + e.getResponseBodyAsString());
+                System.out.println("   Request Headers: " + e.getRequest().getHeaders());
+                System.out.println("   Request Body: " + requestBody);
+                throw new RuntimeException("Error generating response with Groq: " + e.getStatusCode() + " " + e.getStatusText(), e);
+            } catch (Exception e) {
+                System.out.println("❌ Groq API Error Details:");
+                System.out.println("   Error: " + e.getMessage());
+                System.out.println("   API Key Used: " + (apiKey != null && !apiKey.isEmpty() ? apiKey.substring(0, Math.min(8, apiKey.length())) + "..." : "NOT SET"));
+                System.out.println("   Key Source: " + (dynamicApiKeyService.hasValidApiKey("groq", request) ? "DYNAMIC (from frontend)" : "DEFAULT (from environment)"));
+                throw e;
+            }
             
             // Check if AI is requesting MCP tool usage and execute if needed
             String content = processAIToolRequests(response, request.getMessage());
@@ -144,11 +205,12 @@ public class GroqProvider implements AIProvider {
     public List<String> getAvailableModels() {
         return Arrays.asList(
             "llama-3.1-8b-instant",
-            "llama-3.1-70b-versatile",
+            "llama-3.1-70b-versatile", 
+            "llama-3.1-405b-preview",
             "mixtral-8x7b-32768",
             "gemma-7b-it",
             "llama-2-70b-4096",
-            "llama-2-13b-chat"
+            "llama-2-7b-2048"
         );
     }
 

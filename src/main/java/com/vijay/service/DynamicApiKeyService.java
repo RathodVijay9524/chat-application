@@ -15,10 +15,11 @@ public class DynamicApiKeyService {
      */
     public String getApiKeyForProvider(String provider, ChatRequest request) {
         if (request == null) {
+            System.out.println("🔍 DynamicApiKeyService: request is null");
             return null;
         }
         
-        return switch (provider.toLowerCase()) {
+        String apiKey = switch (provider.toLowerCase()) {
             case "openai" -> request.getOpenaiApiKey();
             case "claude" -> request.getClaudeApiKey();
             case "groq" -> request.getGroqApiKey();
@@ -27,6 +28,18 @@ public class DynamicApiKeyService {
             case "huggingface" -> request.getHuggingfaceApiKey();
             default -> null;
         };
+        
+        System.out.println("🔍 DynamicApiKeyService.getApiKeyForProvider:");
+        System.out.println("   Provider: " + provider);
+        System.out.println("   Request geminiApiKey: " + (request.getGeminiApiKey() != null ? request.getGeminiApiKey().substring(0, Math.min(8, request.getGeminiApiKey().length())) + "..." : "NULL"));
+        System.out.println("   Request openaiApiKey: " + (request.getOpenaiApiKey() != null ? request.getOpenaiApiKey().substring(0, Math.min(8, request.getOpenaiApiKey().length())) + "..." : "NULL"));
+        System.out.println("   Request claudeApiKey: " + (request.getClaudeApiKey() != null ? request.getClaudeApiKey().substring(0, Math.min(8, request.getClaudeApiKey().length())) + "..." : "NULL"));
+        System.out.println("   Request groqApiKey: " + (request.getGroqApiKey() != null ? request.getGroqApiKey().substring(0, Math.min(8, request.getGroqApiKey().length())) + "..." : "NULL"));
+        System.out.println("   Request openrouterApiKey: " + (request.getOpenrouterApiKey() != null ? request.getOpenrouterApiKey().substring(0, Math.min(8, request.getOpenrouterApiKey().length())) + "..." : "NULL"));
+        System.out.println("   Request huggingfaceApiKey: " + (request.getHuggingfaceApiKey() != null ? request.getHuggingfaceApiKey().substring(0, Math.min(8, request.getHuggingfaceApiKey().length())) + "..." : "NULL"));
+        System.out.println("   Returned API key: " + (apiKey != null ? apiKey.substring(0, Math.min(8, apiKey.length())) + "..." : "NULL"));
+        
+        return apiKey;
     }
     
     /**

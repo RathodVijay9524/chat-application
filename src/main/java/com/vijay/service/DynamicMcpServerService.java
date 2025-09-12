@@ -423,6 +423,8 @@ public class DynamicMcpServerService {
                 try {
                     // Create ProcessBuilder for the MCP server (reusing the existing one)
                     processBuilder.command(commandList);
+                    // IMPORTANT: Do NOT merge stderr into stdout for MCP stdio.
+                    // MCP frames are written on stdout, logs on stderr. Merging would corrupt framing.
                     
                     // Set working directory if specified
                     if (workingDirectory != null && !workingDirectory.trim().isEmpty()) {
@@ -605,6 +607,20 @@ public class DynamicMcpServerService {
 
             // Start the process directly without MCP SDK
             Process process = processBuilder.start();
+            // Start a background thread to continuously drain and log stderr to avoid blocking
+            Thread stderrDrainer = new Thread(() -> {
+                try (var is = process.getErrorStream();
+                     var reader = new java.io.BufferedReader(new java.io.InputStreamReader(is))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        log.info("STDERR Message received: {}", line);
+                    }
+                } catch (Exception ex) {
+                    log.debug("STDERR drainer stopped: {}", ex.getMessage());
+                }
+            }, "mcp-stderr-drain-" + name);
+            stderrDrainer.setDaemon(true);
+            stderrDrainer.start();
             log.info("Started STDIO process for '{}' with PID {} and command {}", name, process.pid(), cmd);
 
             // Wrap the process in our RealStdioMcpClient abstraction

@@ -5,6 +5,7 @@ import com.vijay.dto.ChatResponse;
 import com.vijay.dto.ProviderInfo;
 import com.vijay.provider.AIProvider;
 import com.vijay.service.DynamicApiKeyService;
+import com.vijay.service.DynamicChatClientService;
 import com.vijay.service.RAGService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
@@ -12,11 +13,14 @@ import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 
 @Slf4j
 @Component
@@ -24,17 +28,20 @@ public class GeminiProvider implements AIProvider {
 
     private final String defaultApiKey;
     private final DynamicApiKeyService dynamicApiKeyService;
+    private final DynamicChatClientService dynamicChatClientService;
     private final RAGService ragService;
     private final ChatClient chatClient;
     private final ToolCallbackProvider toolCallbackProvider;
 
     public GeminiProvider(@Value("${gemini.api-key:}") String apiKey,
                           DynamicApiKeyService dynamicApiKeyService,
+                          DynamicChatClientService dynamicChatClientService,
                           RAGService ragService,
                           @Qualifier("geminiChatClient") ChatClient chatClient,
                           ToolCallbackProvider toolCallbackProvider) {
         this.defaultApiKey = apiKey != null ? apiKey : "";
         this.dynamicApiKeyService = dynamicApiKeyService;
+        this.dynamicChatClientService = dynamicChatClientService;
         this.ragService = ragService;
         this.chatClient = chatClient;
         this.toolCallbackProvider = toolCallbackProvider;
@@ -60,6 +67,12 @@ public class GeminiProvider implements AIProvider {
     
     @Override
     public ChatResponse generateResponse(ChatRequest request) {
+        System.out.println("🔍 GeminiProvider.generateResponse called");
+        System.out.println("🔍 Request in GeminiProvider: " + request.toString());
+        System.out.println("🔍 geminiApiKey in GeminiProvider: " + (request.getGeminiApiKey() != null ? request.getGeminiApiKey().substring(0, Math.min(8, request.getGeminiApiKey().length())) + "..." : "NULL"));
+        System.out.println("🔍 Request hash in GeminiProvider: " + request.hashCode());
+        System.out.println("🔍 Request class in GeminiProvider: " + request.getClass().getName());
+        
         long startTime = System.currentTimeMillis();
         try {
             // Generate RAG context
@@ -69,9 +82,18 @@ public class GeminiProvider implements AIProvider {
             String enhancedPrompt = buildEnhancedPrompt(request.getMessage(), ragContext);
             
             // Get API key for logging purposes
-            String apiKey = dynamicApiKeyService.getApiKeyForProvider("gemini", request);
+            String dynamicApiKey = dynamicApiKeyService.getApiKeyForProvider("gemini", request);
+            System.out.println("🔍 API Key Debug in GeminiProvider:");
+            System.out.println("   Dynamic API Key from request: " + (dynamicApiKey != null ? dynamicApiKey.substring(0, Math.min(8, dynamicApiKey.length())) + "..." : "NULL"));
+            System.out.println("   Default API Key from properties: " + (defaultApiKey != null ? defaultApiKey.substring(0, Math.min(8, defaultApiKey.length())) + "..." : "NULL"));
+            System.out.println("   Request geminiApiKey field: " + (request.getGeminiApiKey() != null ? request.getGeminiApiKey().substring(0, Math.min(8, request.getGeminiApiKey().length())) + "..." : "NULL"));
+            
+            String apiKey = dynamicApiKey;
             if (apiKey == null || apiKey.trim().isEmpty()) {
                 apiKey = defaultApiKey;
+                System.out.println("   Using DEFAULT API key (dynamic was null/empty)");
+            } else {
+                System.out.println("   Using DYNAMIC API key from frontend");
             }
             
             // Load system message from resources
@@ -82,12 +104,67 @@ public class GeminiProvider implements AIProvider {
             String toolInfo = getMCPToolInfo();
             String enhancedSystemMessage = systemMessage + "\n\nAvailable MCP Tools (" + mcpToolCount + "):\n" + toolInfo;
             
-            // Use ChatClient for memory management, then WebClient for API call
-            String response = chatClient.prompt()
-                    .system(enhancedSystemMessage)
-                    .user(enhancedPrompt)
-                    .call()
-                    .content();
+            // Use dynamic WebClient with the API key from frontend for API calls
+            WebClient dynamicWebClient = dynamicChatClientService.createGeminiWebClient(request);
+            
+            // Create the request payload for Gemini API
+            Map<String, Object> requestBody = Map.of(
+                "contents", List.of(
+                    Map.of("parts", List.of(
+                        Map.of("text", enhancedSystemMessage + "\n\n" + enhancedPrompt)
+                    ))
+                ),
+                "generationConfig", Map.of(
+                    "temperature", request.getTemperature() != null ? request.getTemperature() : 0.7,
+                    "maxOutputTokens", request.getMaxTokens() != null ? request.getMaxTokens() : 1000
+                ),
+                "safetySettings", List.of(
+                    Map.of("category", "HARM_CATEGORY_HARASSMENT", "threshold", "BLOCK_MEDIUM_AND_ABOVE"),
+                    Map.of("category", "HARM_CATEGORY_HATE_SPEECH", "threshold", "BLOCK_MEDIUM_AND_ABOVE"),
+                    Map.of("category", "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold", "BLOCK_MEDIUM_AND_ABOVE"),
+                    Map.of("category", "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold", "BLOCK_MEDIUM_AND_ABOVE")
+                )
+            );
+            
+            // Debug logging
+            System.out.println("🔍 Gemini API Debug:");
+            System.out.println("   API Key: " + (apiKey != null && !apiKey.isEmpty() ? apiKey.substring(0, Math.min(8, apiKey.length())) + "..." : "NOT SET"));
+            System.out.println("   API Key Length: " + (apiKey != null ? apiKey.length() : 0));
+            System.out.println("   Key Source: " + (dynamicApiKeyService.hasValidApiKey("gemini", request) ? "DYNAMIC (from frontend)" : "DEFAULT (from environment)"));
+            System.out.println("   Request Body: " + requestBody);
+            System.out.println("   Full API Key: " + apiKey);
+            
+            // Make API call with dynamic API key
+            String response;
+            try {
+                response = dynamicWebClient.post()
+                        .uri("/models/gemini-1.5-flash:generateContent")
+                        .bodyValue(requestBody)
+                        .retrieve()
+                        .bodyToMono(Map.class)
+                        .map(responseMap -> {
+                            // Extract the response text from Gemini API response
+                            Map<String, Object> candidates = (Map<String, Object>) ((List<?>) responseMap.get("candidates")).get(0);
+                            Map<String, Object> content = (Map<String, Object>) candidates.get("content");
+                            List<Map<String, Object>> parts = (List<Map<String, Object>>) content.get("parts");
+                            return (String) parts.get(0).get("text");
+                        })
+                        .block();
+            } catch (WebClientResponseException e) {
+                System.out.println("❌ Gemini API Error Details:");
+                System.out.println("   Error: " + e.getStatusCode() + " " + e.getStatusText() + " from " + e.getRequest().getURI());
+                System.out.println("   API Key Used: " + (apiKey != null && !apiKey.isEmpty() ? apiKey.substring(0, Math.min(8, apiKey.length())) + "..." : "NOT SET"));
+                System.out.println("   Key Source: " + (dynamicApiKeyService.hasValidApiKey("gemini", request) ? "DYNAMIC (from frontend)" : "DEFAULT (from environment)"));
+                System.out.println("   Response Body: " + e.getResponseBodyAsString());
+                System.out.println("   Request Headers: " + e.getRequest().getHeaders());
+                throw new RuntimeException("Error generating response with Gemini: " + e.getStatusCode() + " " + e.getStatusText(), e);
+            } catch (Exception e) {
+                System.out.println("❌ Gemini API Error Details:");
+                System.out.println("   Error: " + e.getMessage());
+                System.out.println("   API Key Used: " + (apiKey != null && !apiKey.isEmpty() ? apiKey.substring(0, Math.min(8, apiKey.length())) + "..." : "NOT SET"));
+                System.out.println("   Key Source: " + (dynamicApiKeyService.hasValidApiKey("gemini", request) ? "DYNAMIC (from frontend)" : "DEFAULT (from environment)"));
+                throw e;
+            }
             
             // Check if AI is requesting MCP tool usage and execute if needed
             String content = processAIToolRequests(response, request.getMessage());

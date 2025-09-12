@@ -19,6 +19,12 @@ public class ChatService {
     private final AIProviderFactory providerFactory;
     
     public ChatResponse generateResponse(ChatRequest request) {
+        System.out.println("🔍 ChatService.generateResponse called");
+        System.out.println("🔍 Request in ChatService: " + request.toString());
+        System.out.println("🔍 geminiApiKey in ChatService: " + (request.getGeminiApiKey() != null ? request.getGeminiApiKey().substring(0, Math.min(8, request.getGeminiApiKey().length())) + "..." : "NULL"));
+        System.out.println("🔍 Request hash in ChatService: " + request.hashCode());
+        System.out.println("🔍 Request class in ChatService: " + request.getClass().getName());
+        
         log.info("Generating response for provider: {}, model: {}", request.getProvider(), request.getModel());
         
         // Generate conversation ID if not provided
