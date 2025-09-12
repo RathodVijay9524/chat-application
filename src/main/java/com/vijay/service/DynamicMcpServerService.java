@@ -824,6 +824,13 @@ public class DynamicMcpServerService {
             }
         } catch (Exception e) {
             log.error("Error updating tool callback provider: {}", e.getMessage(), e);
+            // Create a fallback provider with just static clients
+            try {
+                this.toolCallbackProvider = new SyncMcpToolCallbackProvider(staticClients);
+                log.warn("Created fallback tool callback provider with {} static clients", staticClients.size());
+            } catch (Exception fallbackError) {
+                log.error("Failed to create fallback tool callback provider: {}", fallbackError.getMessage());
+            }
         }
     }
     
@@ -836,6 +843,7 @@ public class DynamicMcpServerService {
         
         int startedCount = 0;
         int totalEnabled = 0;
+        int failedCount = 0;
         
         for (Map.Entry<String, McpServerConfig> entry : serverConfigs.entrySet()) {
             String serverId = entry.getKey();
@@ -851,20 +859,33 @@ public class DynamicMcpServerService {
                 totalEnabled++;
                 log.info("Auto-starting enabled dynamic server: {} ({})", config.getName(), serverId);
                 
-                boolean started = startServer(serverId);
-                if (started) {
-                    startedCount++;
-                    log.info("✅ Auto-started dynamic server: {} ({})", config.getName(), serverId);
-                } else {
-                    log.warn("⚠️ Failed to auto-start dynamic server: {} ({})", config.getName(), serverId);
+                try {
+                    boolean started = startServer(serverId);
+                    if (started) {
+                        startedCount++;
+                        log.info("✅ Auto-started dynamic server: {} ({})", config.getName(), serverId);
+                    } else {
+                        failedCount++;
+                        log.warn("⚠️ Failed to auto-start dynamic server: {} ({})", config.getName(), serverId);
+                    }
+                } catch (Exception e) {
+                    failedCount++;
+                    log.error("❌ Error starting dynamic server {} ({}): {}", config.getName(), serverId, e.getMessage());
+                    // Continue with other servers even if one fails
                 }
             }
         }
         
-        log.info("🎯 Auto-start completed: {}/{} enabled dynamic servers started", startedCount, totalEnabled);
+        log.info("🎯 Auto-start completed: {}/{} enabled dynamic servers started ({} failed)", 
+                startedCount, totalEnabled, failedCount);
         
-        // Update tool callback provider after auto-start
-        updateToolCallbackProvider();
+        // Update tool callback provider after auto-start (with error handling)
+        try {
+            updateToolCallbackProvider();
+        } catch (Exception e) {
+            log.error("❌ Error updating tool callback provider after auto-start: {}", e.getMessage());
+            // Don't fail the entire startup process
+        }
     }
     
     /**

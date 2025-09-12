@@ -29,7 +29,7 @@ public class McpServerEntity {
     @Column(name = "name", nullable = false, length = 200)
     private String name;
     
-    @Column(name = "description", length = 1000)
+    @Column(name = "description", columnDefinition = "TEXT")
     private String description;
     
     @Enumerated(EnumType.STRING)
@@ -56,17 +56,17 @@ public class McpServerEntity {
     private LocalDateTime lastStopped;
     
     // STDIO Configuration
-    @Column(name = "command", length = 500)
+    @Column(name = "command", columnDefinition = "TEXT")
     private String command;
     
     @Column(name = "args", columnDefinition = "TEXT")
     private String args;
     
-    @Column(name = "working_directory", length = 500)
+    @Column(name = "working_directory", columnDefinition = "TEXT")
     private String workingDirectory;
     
     // SSE Configuration
-    @Column(name = "url", length = 500)
+    @Column(name = "url", columnDefinition = "TEXT")
     private String url;
     
     @Column(name = "endpoint", length = 200)
@@ -76,7 +76,7 @@ public class McpServerEntity {
     private String messageEndpoint;
     
     // Socket Configuration
-    @Column(name = "host", length = 200)
+    @Column(name = "host", length = 100)
     private String host;
     
     @Column(name = "port")

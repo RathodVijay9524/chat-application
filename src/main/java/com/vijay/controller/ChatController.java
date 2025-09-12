@@ -3,12 +3,17 @@ package com.vijay.controller;
 import com.vijay.dto.ChatRequest;
 import com.vijay.dto.ChatResponse;
 import com.vijay.dto.ProviderInfo;
+import com.vijay.entity.Conversation;
+import com.vijay.entity.ChatMessage;
 import com.vijay.service.ChatService;
+import com.vijay.service.ConversationService;
+import com.vijay.service.UserSessionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import jakarta.servlet.http.HttpServletRequest;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -28,6 +33,8 @@ import java.util.concurrent.ConcurrentHashMap;
 public class ChatController {
     
     private final ChatService chatService;
+    private final ConversationService conversationService;
+    private final UserSessionService userSessionService;
     
     // Cache for providers to avoid repeated availability checks
     private final Map<String, List<ProviderInfo>> providersCache = new ConcurrentHashMap<>();
@@ -35,13 +42,30 @@ public class ChatController {
     private static final long CACHE_TTL_MS = 30000; // 30 seconds cache
     
     @PostMapping(value = "/message", consumes = "application/json", produces = "application/json")
-    public ResponseEntity<ChatResponse> sendMessage(@RequestBody ChatRequest request) {
+    public ResponseEntity<ChatResponse> sendMessage(@RequestBody ChatRequest request, HttpServletRequest httpRequest) {
         System.out.println("🔍 MESSAGE ENDPOINT HIT!");
         System.out.println("🔍 REQUEST RECEIVED: " + request.toString());
         System.out.println("🔍 REQUEST HASHCODE: " + request.hashCode());
         System.out.println("🔍 REQUEST CLASS: " + request.getClass().getName());
-        log.info("Received chat request: provider={}, model={}, message={}", 
-                request.getProvider(), request.getModel(), request.getMessage());
+        log.info("Received chat request: provider={}, model={}, message={}, userId={}", 
+                request.getProvider(), request.getModel(), request.getMessage(), request.getUserId());
+        
+        // User session management
+        String userId = request.getUserId();
+        if (userId != null && !userId.trim().isEmpty()) {
+            System.out.println("🔍 USER SESSION: User ID = " + userId);
+            
+            // Get or create conversation
+            Conversation conversation = conversationService.getOrCreateConversation(request);
+            System.out.println("🔍 CONVERSATION: ID = " + conversation.getConversationId() + ", Title = " + conversation.getTitle());
+            
+            // Update user session activity
+            String userAgent = httpRequest.getHeader("User-Agent");
+            String ipAddress = getClientIpAddress(httpRequest);
+            userSessionService.validateAndUpdateSession(userId, "chat/message");
+        } else {
+            System.out.println("🔍 USER SESSION: No user ID provided - anonymous session");
+        }
         
         // Debug logging for API keys
         System.out.println("🔍 ChatController Debug - Received Request:");
@@ -81,6 +105,18 @@ public class ChatController {
             
             ChatResponse response = chatService.generateResponse(request);
             log.info("Generated response successfully for provider: {}", request.getProvider());
+            
+            // Save chat message to database if user is authenticated
+            if (userId != null && !userId.trim().isEmpty()) {
+                try {
+                    ChatMessage savedMessage = conversationService.saveChatMessage(request, response);
+                    System.out.println("🔍 CHAT MESSAGE SAVED: ID = " + savedMessage.getId() + ", Conversation = " + savedMessage.getConversationId());
+                } catch (Exception e) {
+                    log.error("Failed to save chat message: {}", e.getMessage());
+                    // Don't fail the request if database save fails
+                }
+            }
+            
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             log.error("Error processing chat request", e);
@@ -242,5 +278,114 @@ public class ChatController {
         response.put("huggingfaceApiKey", request.getHuggingfaceApiKey() != null ? request.getHuggingfaceApiKey().substring(0, Math.min(8, request.getHuggingfaceApiKey().length())) + "..." : "NOT SET");
         
         return ResponseEntity.ok(response);
+    }
+    
+    /**
+     * Get user's conversation history
+     */
+    @GetMapping("/conversations/{userId}")
+    public ResponseEntity<List<Conversation>> getUserConversations(@PathVariable String userId) {
+        try {
+            List<Conversation> conversations = conversationService.getUserConversations(userId);
+            return ResponseEntity.ok(conversations);
+        } catch (Exception e) {
+            log.error("Error retrieving conversations for user {}: {}", userId, e.getMessage());
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+    
+    /**
+     * Get user's chat list (alias for conversations)
+     * This endpoint is called by User-Master
+     */
+    @GetMapping("/users/{userId}/chats")
+    public ResponseEntity<List<Conversation>> getUserChatList(@PathVariable String userId) {
+        log.info("Received request to fetch chat list for user: {}", userId);
+        try {
+            List<Conversation> conversations = conversationService.getUserConversations(userId);
+            log.info("Successfully fetched {} chats for user {}", conversations.size(), userId);
+            return ResponseEntity.ok(conversations);
+        } catch (Exception e) {
+            log.error("Error retrieving chat list for user {}: {}", userId, e.getMessage());
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+    
+    /**
+     * Get conversation messages
+     */
+    @GetMapping("/conversations/{conversationId}/messages")
+    public ResponseEntity<List<ChatMessage>> getConversationMessages(@PathVariable String conversationId) {
+        try {
+            List<ChatMessage> messages = conversationService.getConversationMessages(conversationId);
+            return ResponseEntity.ok(messages);
+        } catch (Exception e) {
+            log.error("Error retrieving messages for conversation {}: {}", conversationId, e.getMessage());
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+    
+    /**
+     * Get conversation messages for a specific user and conversation
+     * This endpoint is called by User-Master
+     */
+    @GetMapping("/users/{userId}/conversations/{conversationId}/messages")
+    public ResponseEntity<List<ChatMessage>> getUserConversationMessages(
+            @PathVariable String userId, 
+            @PathVariable String conversationId) {
+        log.info("Received request to fetch messages for conversation: {} of user: {}", conversationId, userId);
+        try {
+            List<ChatMessage> messages = conversationService.getConversationMessages(conversationId);
+            log.info("Successfully fetched {} messages for conversation {}", messages.size(), conversationId);
+            return ResponseEntity.ok(messages);
+        } catch (Exception e) {
+            log.error("Error retrieving messages for conversation {}: {}", conversationId, e.getMessage());
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+    
+    /**
+     * Get user statistics
+     */
+    @GetMapping("/users/{userId}/stats")
+    public ResponseEntity<ConversationService.UserStats> getUserStats(@PathVariable String userId) {
+        try {
+            ConversationService.UserStats stats = conversationService.getUserStats(userId);
+            return ResponseEntity.ok(stats);
+        } catch (Exception e) {
+            log.error("Error retrieving stats for user {}: {}", userId, e.getMessage());
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+    
+    /**
+     * Archive a conversation
+     */
+    @PostMapping("/conversations/{conversationId}/archive")
+    public ResponseEntity<String> archiveConversation(@PathVariable String conversationId, @RequestParam String userId) {
+        try {
+            conversationService.archiveConversation(conversationId, userId);
+            return ResponseEntity.ok("Conversation archived successfully");
+        } catch (Exception e) {
+            log.error("Error archiving conversation {}: {}", conversationId, e.getMessage());
+            return ResponseEntity.internalServerError().body("Failed to archive conversation");
+        }
+    }
+    
+    /**
+     * Helper method to get client IP address
+     */
+    private String getClientIpAddress(HttpServletRequest request) {
+        String xForwardedFor = request.getHeader("X-Forwarded-For");
+        if (xForwardedFor != null && !xForwardedFor.isEmpty()) {
+            return xForwardedFor.split(",")[0].trim();
+        }
+        
+        String xRealIp = request.getHeader("X-Real-IP");
+        if (xRealIp != null && !xRealIp.isEmpty()) {
+            return xRealIp;
+        }
+        
+        return request.getRemoteAddr();
     }
 }

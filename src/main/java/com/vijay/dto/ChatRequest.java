@@ -14,6 +14,11 @@ public class ChatRequest {
     private Integer maxTokens = 1000;
     private String conversationId;
     
+    // User session management
+    @JsonProperty("userId")
+    @JsonAlias({"user_id", "user-id", "user"})
+    private String userId;
+    
     // API Keys for dynamic provider configuration
     @JsonProperty("openaiApiKey")
     @JsonAlias({"openai_api_key", "openai-api-key", "openai_key"})

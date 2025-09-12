@@ -27,13 +27,20 @@ public class McpServerStartupConfig {
             // Load servers from database
             mcpServerService.loadServersFromDatabase();
             
-            // Auto-start all enabled servers
+            // Auto-start all enabled servers (with error handling)
             log.info("🔄 Auto-starting enabled dynamic servers...");
-            mcpServerService.autoStartEnabledServers();
+            try {
+                mcpServerService.autoStartEnabledServers();
+            } catch (Exception e) {
+                log.warn("⚠️ Some MCP servers failed to start, but continuing with application startup: {}", e.getMessage());
+                // Don't fail the entire application startup if MCP servers fail
+            }
             
             log.info("✅ MCP server startup configuration completed");
         } catch (Exception e) {
             log.error("❌ Error during MCP server startup configuration: {}", e.getMessage(), e);
+            // Don't fail the entire application startup if MCP configuration fails
+            log.warn("⚠️ Continuing with application startup despite MCP configuration errors");
         }
     }
 }
