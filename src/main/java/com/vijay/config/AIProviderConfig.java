@@ -49,9 +49,21 @@ public class AIProviderConfig {
             public org.springframework.ai.tool.ToolCallback[] getToolCallbacks() {
                 ToolCallbackProvider current = dynamicMcpServerService.getToolCallbackProvider();
                 if (current == null) {
+                    logger.warn("Dynamic MCP service returned null provider, using empty fallback");
                     return new SyncMcpToolCallbackProvider(List.of()).getToolCallbacks();
                 }
-                return current.getToolCallbacks();
+                
+                org.springframework.ai.tool.ToolCallback[] callbacks = current.getToolCallbacks();
+                logger.debug("Delegating provider returning {} tool callbacks", callbacks.length);
+                
+                // Log tool names for debugging
+                if (logger.isDebugEnabled()) {
+                    for (org.springframework.ai.tool.ToolCallback callback : callbacks) {
+                        logger.debug("Available tool: {}", callback.getToolDefinition().name());
+                    }
+                }
+                
+                return callbacks;
             }
         };
     }

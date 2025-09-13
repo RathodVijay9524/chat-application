@@ -3,15 +3,18 @@ package com.vijay.mcp;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.vijay.service.RealStdioMcpClient;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.definition.ToolDefinition;
 import org.springframework.ai.tool.metadata.ToolMetadata;
+import org.springframework.lang.NonNull;
 
 import java.util.Map;
 
 /**
  * A ToolCallback implementation that forwards tool calls to a RealStdioMcpClient.
  */
+@Slf4j
 public class DynamicToolCallback implements ToolCallback {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -46,8 +49,11 @@ public class DynamicToolCallback implements ToolCallback {
     }
 
     @Override
-    public String call(String toolInput) {
+    @NonNull
+    public String call(@NonNull String toolInput) {
         try {
+            log.info("🔧 Calling dynamic tool '{}' with input: {}", toolName, toolInput);
+            
             Map<String, Object> args;
             if (toolInput == null || toolInput.isBlank()) {
                 args = Map.of();
@@ -56,22 +62,25 @@ public class DynamicToolCallback implements ToolCallback {
             }
 
             Object result = client.callTool(toolName, args);
-
-            // Wrap result in a standard envelope
+            
             ObjectNode node = MAPPER.createObjectNode();
-            node.put("server", client.getName());
-            node.put("tool", toolName);
-            node.set("result", MAPPER.valueToTree(result));
-            return MAPPER.writeValueAsString(node);
+            if (result != null) {
+                node.set("result", MAPPER.valueToTree(result));
+            } else {
+                node.put("result", "Tool executed successfully");
+            }
+            
+            String response = MAPPER.writeValueAsString(node);
+            log.info("✅ Dynamic tool '{}' returned: {}", toolName, response);
+            return response;
         } catch (Exception e) {
-            ObjectNode err = MAPPER.createObjectNode();
-            err.put("server", client.getName());
-            err.put("tool", toolName);
-            err.put("error", e.getMessage());
+            log.error("❌ Error calling dynamic tool '{}': {}", toolName, e.getMessage(), e);
             try {
-                return MAPPER.writeValueAsString(err);
-            } catch (Exception ignored) {
-                return "{\"error\":\"" + e.getMessage().replace("\"", "'") + "\"}";
+                ObjectNode errorNode = MAPPER.createObjectNode();
+                errorNode.put("error", "Tool execution failed: " + e.getMessage());
+                return MAPPER.writeValueAsString(errorNode);
+            } catch (Exception jsonError) {
+                return "{\"error\": \"Tool execution and JSON serialization failed\"}";
             }
         }
     }

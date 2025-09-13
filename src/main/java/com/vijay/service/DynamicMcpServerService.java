@@ -10,6 +10,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.mcp.SyncMcpToolCallbackProvider;
 import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.ai.tool.ToolCallback;
+import org.springframework.lang.NonNull;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -190,14 +191,27 @@ public class DynamicMcpServerService {
                 return true;
             }
             
-            log.info("Starting MCP server: {} (type: {})", config.getName(), config.getTransportType());
+            log.info("🚀 Starting MCP server: {} (type: {})", config.getName(), config.getTransportType());
             
             Object client = createClient(config);
             if (client != null) {
                 activeClients.put(serverId, client);
+                log.info("✅ Client created and added to activeClients: {} (total active: {})", 
+                        serverId, activeClients.size());
+                
+                // Debug: Log client type
+                log.info("🔍 Client type: {}", client.getClass().getSimpleName());
+                if (client instanceof RealStdioMcpClient) {
+                    RealStdioMcpClient realClient = (RealStdioMcpClient) client;
+                    log.info("🔍 Real STDIO client details: name={}, PID={}, alive={}", 
+                            realClient.getName(), realClient.getProcess().pid(), realClient.isProcessAlive());
+                }
+                
                 updateToolCallbackProvider();
-                log.info(" MCP server started successfully: {}", config.getName());
+                log.info("✅ MCP server started successfully: {}", config.getName());
                 return true;
+            } else {
+                log.error("❌ Failed to create client for server: {}", config.getName());
             }
             
             return false;
@@ -319,6 +333,26 @@ public class DynamicMcpServerService {
      * Get the current tool callback provider
      */
     public ToolCallbackProvider getToolCallbackProvider() {
+        if (toolCallbackProvider == null) {
+            log.warn("🚨 Tool callback provider is NULL - this should not happen!");
+            return null;
+        }
+        
+        ToolCallback[] callbacks = toolCallbackProvider.getToolCallbacks();
+        log.debug("🔍 Current provider has {} tool callbacks", callbacks.length);
+        
+        // Debug: Count static vs dynamic tools
+        int staticCount = 0;
+        int dynamicCount = 0;
+        for (ToolCallback callback : callbacks) {
+            if (callback instanceof com.vijay.mcp.DynamicToolCallback) {
+                dynamicCount++;
+            } else {
+                staticCount++;
+            }
+        }
+        log.debug("🔍 Tool breakdown: {} static, {} dynamic", staticCount, dynamicCount);
+        
         return toolCallbackProvider;
     }
     
@@ -804,7 +838,34 @@ public class DynamicMcpServerService {
             }
             
             // Create a custom tool callback provider that includes dynamic tools
-            this.toolCallbackProvider = createEnhancedToolCallbackProvider(allClients);
+            ToolCallbackProvider enhancedProvider = createEnhancedToolCallbackProvider(allClients);
+            
+            if (enhancedProvider != null) {
+                this.toolCallbackProvider = enhancedProvider;
+                log.info("✅ Enhanced tool callback provider created and stored successfully");
+                
+                // Verify the provider was stored correctly
+                var toolCallbacks = this.toolCallbackProvider.getToolCallbacks();
+                log.info("✅ Enhanced provider has {} total tools available", toolCallbacks.length);
+                
+                // Log tool details for debugging
+                int staticToolCount = 0;
+                int dynamicToolCount = 0;
+                for (var callback : toolCallbacks) {
+                    String toolName = callback.getToolDefinition().name();
+                    if (callback instanceof com.vijay.mcp.DynamicToolCallback) {
+                        dynamicToolCount++;
+                        log.info("🔧 Dynamic tool available: {}", toolName);
+                    } else {
+                        staticToolCount++;
+                        log.info("📋 Static tool available: {}", toolName);
+                    }
+                }
+                
+                log.info("📊 Tool breakdown: {} static tools, {} dynamic tools", staticToolCount, dynamicToolCount);
+            } else {
+                log.error("❌ Failed to create enhanced tool callback provider, keeping existing provider");
+            }
             
             // Log dynamic clients for debugging
             for (Map.Entry<String, Object> entry : activeClients.entrySet()) {
@@ -816,12 +877,6 @@ public class DynamicMcpServerService {
             log.info("Updated tool callback provider with {} clients ({} static, {} dynamic)", 
                     allClients.size(), staticClients.size(), activeClients.size());
             log.info("Active dynamic clients: {}", activeClients.keySet());
-            
-            // Log the current tool count for debugging
-            if (this.toolCallbackProvider != null) {
-                var toolCallbacks = this.toolCallbackProvider.getToolCallbacks();
-                log.info("Current tool callback provider has {} tools", toolCallbacks.length);
-            }
         } catch (Exception e) {
             log.error("Error updating tool callback provider: {}", e.getMessage(), e);
             // Create a fallback provider with just static clients
@@ -893,64 +948,145 @@ public class DynamicMcpServerService {
      */
     private ToolCallbackProvider createEnhancedToolCallbackProvider(List<McpSyncClient> staticClients) {
         try {
+            log.info("🔧 Creating enhanced tool callback provider...");
+            
             // Create the base tool callback provider with static clients
-            SyncMcpToolCallbackProvider baseProvider = new SyncMcpToolCallbackProvider(staticClients);
+            SyncMcpToolCallbackProvider baseProvider = new SyncMcpToolCallbackProvider(staticClients != null ? staticClients : List.of());
             
             // Build a combined list of ToolCallbacks: static (via base) + dynamic (via RealStdioMcpClient)
             List<ToolCallback> combined = new ArrayList<>();
-            combined.addAll(Arrays.asList(baseProvider.getToolCallbacks()));
+            ToolCallback[] staticCallbacks = baseProvider.getToolCallbacks();
+            if (staticCallbacks != null) {
+                combined.addAll(Arrays.asList(staticCallbacks));
+                log.info("📋 Added {} static tool callbacks", staticCallbacks.length);
+            }
 
             ObjectMapper mapper = new ObjectMapper();
-
             int realDynamicToolsCount = 0;
-            for (Object client : activeClients.values()) {
+            int processedClients = 0;
+            
+            log.info("🔍 Processing {} active clients for dynamic tools...", activeClients.size());
+            
+            for (Map.Entry<String, Object> entry : activeClients.entrySet()) {
+                String clientId = entry.getKey();
+                Object client = entry.getValue();
+                
+                log.info("🔍 Processing client: {} (type: {})", clientId, client.getClass().getSimpleName());
+                
                 if (client instanceof RealStdioMcpClient) {
                     RealStdioMcpClient real = (RealStdioMcpClient) client;
+                    processedClients++;
+                    
+                    log.info("🔧 Processing RealStdioMcpClient: {} ({})", real.getName(), clientId);
+                    log.info("🔍 Process alive: {}, PID: {}", real.isProcessAlive(), real.getProcess().pid());
+                    
                     try {
+                        log.info("🔧 Getting tools from real STDIO client: {} ({})", real.getName(), clientId);
+                        
+                        // Check if process is still alive before attempting tool discovery
+                        if (!real.isProcessAlive()) {
+                            log.error("❌ Process is dead for client {}, skipping tool discovery", real.getName());
+                            continue;
+                        }
+                        
                         List<Object> tools = real.listTools();
+                        
+                        if (tools == null) {
+                            log.error("❌ Real STDIO client {} returned NULL tools list", real.getName());
+                            continue;
+                        }
+                        
+                        if (tools.isEmpty()) {
+                            log.warn("⚠️ Real STDIO client {} returned empty tools list (0 tools)", real.getName());
+                            log.warn("   This could be due to initialization timeout or MCP protocol issues");
+                            continue;
+                        }
+                        
+                        log.info("✅ Real STDIO client {} returned {} tools", real.getName(), tools.size());
+                        
                         for (Object t : tools) {
                             if (t instanceof Map) {
                                 @SuppressWarnings("unchecked")
                                 Map<String, Object> tm = (Map<String, Object>) t;
-                                String toolName = String.valueOf(tm.getOrDefault("name", "dynamic_tool"));
-                                String description = (String) tm.getOrDefault("description", "Dynamic tool");
+                                String toolName = String.valueOf(tm.getOrDefault("name", "dynamic_tool_" + realDynamicToolsCount));
+                                String description = (String) tm.getOrDefault("description", "Dynamic tool from " + real.getName());
                                 Object inputSchema = tm.get("inputSchema");
                                 String inputSchemaJson = null;
+                                
                                 try {
                                     if (inputSchema != null) {
                                         inputSchemaJson = mapper.writeValueAsString(inputSchema);
                                     }
-                                } catch (Exception ignored) {}
+                                } catch (Exception schemaError) {
+                                    log.warn("Failed to serialize input schema for tool {}: {}", toolName, schemaError.getMessage());
+                                }
 
-                                combined.add(new DynamicToolCallback(toolName, description, inputSchemaJson, real, toolName));
+                                DynamicToolCallback dynamicCallback = new DynamicToolCallback(toolName, description, inputSchemaJson, real, toolName);
+                                combined.add(dynamicCallback);
                                 realDynamicToolsCount++;
+                                
+                                log.info("✅ Added dynamic tool: {} from client {}", toolName, real.getName());
+                            } else {
+                                log.warn("⚠️ Unexpected tool format from client {}: {}", real.getName(), t.getClass().getSimpleName());
                             }
                         }
-                        log.info("Real STDIO client {} provides {} tools (added to callbacks)", 
-                                real.getName(), tools.size());
+                        
+                        log.info("✅ Successfully processed {} tools from real STDIO client {}", tools.size(), real.getName());
+                        
                     } catch (Exception e) {
-                        log.warn("Error getting tools from real STDIO client {}: {}", 
-                                real.getName(), e.getMessage());
+                        log.error("❌ Error getting tools from real STDIO client {}: {}", real.getName(), e.getMessage(), e);
                     }
+                } else {
+                    log.debug("Skipping non-real client: {} (type: {})", clientId, client.getClass().getSimpleName());
                 }
             }
 
-            log.info("Created tool callback provider with {} static callbacks and {} dynamic callbacks", 
-                    baseProvider.getToolCallbacks().length, realDynamicToolsCount);
+            log.info("📊 Enhanced provider creation summary:");
+            log.info("   - Static callbacks: {}", staticCallbacks != null ? staticCallbacks.length : 0);
+            log.info("   - Dynamic callbacks: {} (from {} real clients)", realDynamicToolsCount, processedClients);
+            log.info("   - Total callbacks: {}", combined.size());
+
+            if (combined.isEmpty()) {
+                log.warn("⚠️ No tool callbacks available, returning empty provider");
+                return new ToolCallbackProvider() {
+                    @Override
+                    @NonNull
+                    public ToolCallback[] getToolCallbacks() {
+                        return new ToolCallback[0];
+                    }
+                };
+            }
 
             final ToolCallback[] callbacksArray = combined.toArray(new ToolCallback[0]);
+            log.info("✅ Enhanced tool callback provider created with {} total tools", callbacksArray.length);
 
             // Return a simple provider that serves the combined tool callbacks
             return new ToolCallbackProvider() {
                 @Override
+                @NonNull
                 public ToolCallback[] getToolCallbacks() {
+                    log.debug("Enhanced provider returning {} tool callbacks", callbacksArray.length);
                     return callbacksArray;
                 }
             };
             
         } catch (Exception e) {
-            log.error("Error creating enhanced tool callback provider: {}", e.getMessage(), e);
-            return new SyncMcpToolCallbackProvider(staticClients);
+            log.error("❌ Critical error creating enhanced tool callback provider: {}", e.getMessage(), e);
+            // Return fallback provider with just static clients
+            try {
+                SyncMcpToolCallbackProvider fallback = new SyncMcpToolCallbackProvider(staticClients != null ? staticClients : List.of());
+                log.warn("🔄 Created fallback provider with {} static clients", staticClients != null ? staticClients.size() : 0);
+                return fallback;
+            } catch (Exception fallbackError) {
+                log.error("❌ Failed to create fallback provider: {}", fallbackError.getMessage());
+                return new ToolCallbackProvider() {
+                    @Override
+                    @NonNull
+                    public ToolCallback[] getToolCallbacks() {
+                        return new ToolCallback[0];
+                    }
+                };
+            }
         }
     }
     
