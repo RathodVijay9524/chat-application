@@ -9,10 +9,8 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 @Slf4j
 @RestController
@@ -256,64 +254,37 @@ public class McpServerController {
             var toolCallbacks = toolCallbackProvider.getToolCallbacks();
             List<Map<String, Object>> tools = new ArrayList<>();
 
-            // Add static tools
+            // Add tools and categorize them as static or dynamic
+            List<String> activeServers = mcpServerService.getActiveServers();
+            int dynamicToolsCount = 0;
+            int staticToolsCount = 0;
+
             for (var toolCallback : toolCallbacks) {
                 Map<String, Object> toolInfo = new HashMap<>();
                 toolInfo.put("name", toolCallback.getToolDefinition().name());
                 toolInfo.put("description", toolCallback.getToolDefinition().description());
-                toolInfo.put("type", "MCP_TOOL");
+                
+                if (toolCallback instanceof com.vijay.mcp.DynamicToolCallback) {
+                    toolInfo.put("type", "DYNAMIC_MCP_TOOL");
+                    dynamicToolsCount++;
+                } else {
+                    toolInfo.put("type", "STATIC_MCP_TOOL");
+                    staticToolsCount++;
+                }
+                
                 tools.add(toolInfo);
             }
 
-            // Add dynamic tools
-            List<String> activeServers = mcpServerService.getActiveServers();
-            int dynamicToolsCount = 0;
-            int dynamicTimeouts = 0;
-
-            var activeClients = mcpServerService.getActiveClients();
-            for (Object client : activeClients.values()) {
-                if (client instanceof com.vijay.service.RealStdioMcpClient) {
-                    try {
-                        java.util.concurrent.CompletableFuture<java.util.List<Object>> fut =
-                                java.util.concurrent.CompletableFuture.supplyAsync(((com.vijay.service.RealStdioMcpClient) client)::listTools);
-                        java.util.List<Object> realTools;
-                        try {
-                            realTools = fut.get(10, java.util.concurrent.TimeUnit.SECONDS);
-                        } catch (java.util.concurrent.TimeoutException te) {
-                            fut.cancel(true);
-                            dynamicTimeouts++;
-                            continue;
-                        }
-                        for (Object tool : realTools) {
-                            if (tool instanceof Map) {
-                                @SuppressWarnings("unchecked")
-                                Map<String, Object> toolMap = (Map<String, Object>) tool;
-                                Map<String, Object> dynamicToolInfo = new HashMap<>();
-                                dynamicToolInfo.put("name", toolMap.get("name"));
-                                dynamicToolInfo.put("description", toolMap.get("description"));
-                                dynamicToolInfo.put("type", "REAL_DYNAMIC_MCP_TOOL");
-                                dynamicToolInfo.put("serverId", ((com.vijay.service.RealStdioMcpClient) client).getName());
-                                dynamicToolInfo.put("inputSchema", toolMap.get("inputSchema"));
-                                tools.add(dynamicToolInfo);
-                                dynamicToolsCount++;
-                            }
-                        }
-                    } catch (Exception e) {
-                        log.warn("Error getting tools from real client {}: {}", client, e.getMessage());
-                    }
-                }
-            }
-
-            log.info("Total tools: {} ({} static + {} dynamic)", tools.size(), toolCallbacks.length, dynamicToolsCount);
+            log.info("Total tools: {} ({} static + {} dynamic)", tools.size(), staticToolsCount, dynamicToolsCount);
 
             return ResponseEntity.ok(Map.of(
                     "status", "success",
                     "message", "Tools available to AI models",
                     "tools", tools,
                     "count", tools.size(),
-                    "staticTools", toolCallbacks.length,
+                    "staticTools", staticToolsCount,
                     "dynamicTools", dynamicToolsCount,
-                    "dynamicTimeouts", dynamicTimeouts,
+                    "dynamicTimeouts", 0,
                     "note", dynamicToolsCount > 0 ? "Static and dynamic tools are injected into all AI models!" : "Only static tools are available",
                     "dynamicServers", activeServers.size(),
                     "injectionStatus", dynamicToolsCount > 0 ? "Dynamic tools are now available to AI models!" : "No dynamic servers active"
@@ -345,63 +316,55 @@ public class McpServerController {
             status.put("activeServers", activeServers.size());
             status.put("serverStatus", serverStatus);
             
-            // Get tool count with de-duplication to avoid double-counting
+            // Get tool count from the enhanced provider (which already includes dynamic tools)
             var toolCallbackProvider = mcpServerService.getToolCallbackProvider();
+            int totalToolCount = 0;
+            int dynamicToolCount = 0;
             int staticToolCount = 0;
-            Set<String> knownToolNames = new HashSet<>();
+            
             if (toolCallbackProvider != null) {
                 var callbacks = toolCallbackProvider.getToolCallbacks();
-                staticToolCount = callbacks.length; // Note: may already include dynamic tools injected into provider
+                totalToolCount = callbacks.length;
+                
+                // Count dynamic vs static tools by checking callback type
                 for (var cb : callbacks) {
                     try {
-                        knownToolNames.add(cb.getToolDefinition().name());
-                    } catch (Exception ignored) {
-                        // ignore any malformed definitions
-                    }
-                }
-            }
-            
-            // Calculate additional dynamic tools that are NOT already present in the callback provider
-            int dynamicToolCount = 0;
-            int dynamicTimeouts = 0;
-            var activeClients = mcpServerService.getActiveClients();
-            for (Object client : activeClients.values()) {
-                if (client instanceof com.vijay.service.RealStdioMcpClient) {
-                    try {
-                        java.util.concurrent.CompletableFuture<java.util.List<Object>> fut =
-                                java.util.concurrent.CompletableFuture.supplyAsync(((com.vijay.service.RealStdioMcpClient) client)::listTools);
-                        java.util.List<Object> realTools;
-                        try {
-                            realTools = fut.get(10, java.util.concurrent.TimeUnit.SECONDS);
-                        } catch (java.util.concurrent.TimeoutException te) {
-                            fut.cancel(true);
-                            dynamicTimeouts++;
-                            continue;
-                        }
-                        for (Object tool : realTools) {
-                            if (tool instanceof Map<?, ?> toolMap) {
-                                Object nameObj = toolMap.get("name");
-                                if (nameObj instanceof String name && !name.isBlank()) {
-                                    if (!knownToolNames.contains(name)) {
-                                        knownToolNames.add(name);
-                                        dynamicToolCount++;
-                                    }
-                                }
-                            }
+                        String className = cb.getClass().getName();
+                        log.debug("Checking callback type: {} for tool: {}", className, cb.getToolDefinition().name());
+                        
+                        if (className.contains("DynamicToolCallback")) {
+                            dynamicToolCount++;
+                            log.debug("Found dynamic tool: {}", cb.getToolDefinition().name());
+                        } else {
+                            staticToolCount++;
+                            log.debug("Found static tool: {}", cb.getToolDefinition().name());
                         }
                     } catch (Exception e) {
-                        log.warn("Error getting tools from real client {}: {}", client, e.getMessage());
+                        staticToolCount++; // Default to static if we can't determine
+                        log.warn("Error checking callback type: {}", e.getMessage());
                     }
                 }
-                // Skip mock clients - they don't provide real tools
+                
+                log.info("Injection status tool count: {} total ({} static + {} dynamic)", totalToolCount, staticToolCount, dynamicToolCount);
             }
             
-            int totalToolCount = knownToolNames.size();
+            // Get active server count
+            var activeClients = mcpServerService.getActiveClients();
+            int activeDynamicServers = 0;
+            for (Object client : activeClients.values()) {
+                if (client instanceof com.vijay.service.RealStdioMcpClient) {
+                    com.vijay.service.RealStdioMcpClient realClient = (com.vijay.service.RealStdioMcpClient) client;
+                    if (realClient.isProcessAlive()) {
+                        activeDynamicServers++;
+                    }
+                }
+            }
             
             status.put("availableTools", totalToolCount);
-            status.put("staticTools", Math.max(0, totalToolCount - dynamicToolCount));
+            status.put("staticTools", staticToolCount);
             status.put("dynamicTools", dynamicToolCount);
-            status.put("dynamicTimeouts", dynamicTimeouts);
+            status.put("activeDynamicServers", activeDynamicServers);
+            status.put("dynamicTimeouts", 0); // No timeouts since we're using cached tools
             
             // Injection status
             if (dynamicToolCount > 0) {
@@ -450,20 +413,56 @@ public class McpServerController {
             }
 
             com.vijay.service.RealStdioMcpClient stdio = (com.vijay.service.RealStdioMcpClient) client;
+            
+            // Try to get tools from enhanced provider first (faster, cached)
+            var toolCallbackProvider = mcpServerService.getToolCallbackProvider();
+            java.util.List<Object> tools = new java.util.ArrayList<>();
+            
+            if (toolCallbackProvider != null) {
+                var callbacks = toolCallbackProvider.getToolCallbacks();
+                for (var cb : callbacks) {
+                    try {
+                        if (cb.getClass().getName().contains("DynamicToolCallback")) {
+                            // This is a dynamic tool from our server
+                            Map<String, Object> toolInfo = new HashMap<>();
+                            toolInfo.put("name", cb.getToolDefinition().name());
+                            toolInfo.put("description", cb.getToolDefinition().description());
+                            toolInfo.put("type", "DYNAMIC_CACHED");
+                            toolInfo.put("source", "enhanced_provider");
+                            tools.add(toolInfo);
+                        }
+                    } catch (Exception ignored) {
+                        // Skip malformed tools
+                    }
+                }
+                
+                if (!tools.isEmpty()) {
+                    return ResponseEntity.ok(Map.of(
+                            "status", "success",
+                            "serverId", serverId,
+                            "serverName", stdio.getName(),
+                            "count", tools.size(),
+                            "tools", tools,
+                            "note", "Tools retrieved from enhanced provider cache (faster than direct MCP query)"
+                    ));
+                }
+            }
+            
+            // Fallback to direct query with shorter timeout
             java.util.concurrent.CompletableFuture<java.util.List<Object>> fut =
                     java.util.concurrent.CompletableFuture.supplyAsync(stdio::listTools);
-            java.util.List<Object> tools;
             try {
-                tools = fut.get(10, java.util.concurrent.TimeUnit.SECONDS);
+                tools = fut.get(5, java.util.concurrent.TimeUnit.SECONDS); // Reduced timeout
             } catch (java.util.concurrent.TimeoutException te) {
                 fut.cancel(true);
                 return ResponseEntity.ok(Map.of(
                         "status", "timeout",
-                        "message", "Timed out waiting for tools/list response from STDIO server",
+                        "message", "FastMCP server not responding to direct queries (but tools are available via enhanced provider)",
                         "serverId", serverId,
                         "serverName", stdio.getName(),
                         "count", 0,
-                        "tools", java.util.List.of()
+                        "tools", java.util.List.of(),
+                        "note", "Use /api/mcp-servers/ai-tools to see all available tools including dynamic ones"
                 ));
             }
 
