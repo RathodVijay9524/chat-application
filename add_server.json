@@ -1,0 +1,15 @@
+{
+  "id": "my-python-mcp-server-stdio",
+  "name": "Python Coding Assistant MCP Server",
+  "description": "FastMCP server with coding assistant tools",
+  "transportType": "STDIO",
+  "enabled": true,
+  "configuration": {
+    "command": "python",
+    "args": ["E:\\ai_projects\\MCP_apps\\coding_assistant_mcp\\coding_assistant_mcp.py"],
+    "workingDirectory": "E:\\ai_projects\\MCP_apps\\coding_assistant_mcp",
+    "environment": {
+      "PYTHONPATH": "E:\\ai_projects\\MCP_apps\\coding_assistant_mcp"
+    }
+  }
+}

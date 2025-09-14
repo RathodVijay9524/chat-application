@@ -1,5 +1,7 @@
 package com.vijay.config;
 
+import com.vijay.dto.McpServerConfig;
+
 import com.vijay.service.DynamicMcpServerService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -25,12 +27,14 @@ public class McpServerStartupConfig {
         log.info("🚀 Application ready - loading MCP servers from MySQL database...");
         try {
             // Load servers from database
-            mcpServerService.loadServersFromDatabase();
+            mcpServerService.loadServersFromMemory();
             
             // Auto-start all enabled servers (with error handling)
             log.info("🔄 Auto-starting enabled dynamic servers...");
             try {
-                mcpServerService.autoStartEnabledServers();
+                mcpServerService.getAllServers().stream()
+                    .filter(McpServerConfig::isEnabled)
+                    .forEach(config -> mcpServerService.startServer(config.getId()));
             } catch (Exception e) {
                 log.warn("⚠️ Some MCP servers failed to start, but continuing with application startup: {}", e.getMessage());
                 // Don't fail the entire application startup if MCP servers fail

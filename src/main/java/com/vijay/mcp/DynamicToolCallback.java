@@ -2,7 +2,7 @@ package com.vijay.mcp;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.vijay.service.RealStdioMcpClient;
+import com.vijay.mcp.UniversalMcpClient;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.definition.ToolDefinition;
@@ -12,7 +12,7 @@ import org.springframework.lang.NonNull;
 import java.util.Map;
 
 /**
- * A ToolCallback implementation that forwards tool calls to a RealStdioMcpClient.
+ * A ToolCallback implementation that forwards tool calls to a Universal MCP Client.
  */
 @Slf4j
 public class DynamicToolCallback implements ToolCallback {
@@ -20,11 +20,11 @@ public class DynamicToolCallback implements ToolCallback {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final ToolDefinition definition;
-    private final RealStdioMcpClient client;
+    private final UniversalMcpClient client;
     private final String toolName;
 
     public DynamicToolCallback(String name, String description, String inputSchemaJson,
-                               RealStdioMcpClient client, String toolName) {
+                               UniversalMcpClient client, String toolName) {
         var builder = ToolDefinition.builder()
                 .name(name)
                 .description(description != null ? description : ("Dynamic tool " + name));
