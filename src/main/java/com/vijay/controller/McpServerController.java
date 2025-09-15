@@ -4,10 +4,10 @@ import com.vijay.dto.McpServerConfig;
 import com.vijay.mcp.UniversalMcpClient;
 import com.vijay.service.DynamicMcpServerService;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -18,12 +18,59 @@ import java.util.Map;
 @CrossOrigin(origins = {"http://localhost:5173", "http://localhost:3000"}, allowedHeaders = "*", allowCredentials = "true", methods = {RequestMethod.GET, RequestMethod.POST, RequestMethod.PUT, RequestMethod.DELETE, RequestMethod.OPTIONS, RequestMethod.HEAD})
 public class McpServerController {
 
-    @Autowired
-    private DynamicMcpServerService mcpServerService;
+    private final DynamicMcpServerService mcpServerService;
+    
+    public McpServerController(DynamicMcpServerService mcpServerService) {
+        this.mcpServerService = mcpServerService;
+    }
 
     @GetMapping
-    public ResponseEntity<List<McpServerConfig>> getAllServers() {
-        return ResponseEntity.ok(mcpServerService.getAllServers());
+    public ResponseEntity<Map<String, Object>> getAllServersSimple() {
+        try {
+            List<McpServerConfig> allServers = mcpServerService.getAllServers();
+            Map<String, Object> activeClients = mcpServerService.getActiveClients();
+            
+            // Add status information to each server
+            List<Map<String, Object>> serverList = new ArrayList<>();
+            for (McpServerConfig server : allServers) {
+                Map<String, Object> serverInfo = new HashMap<>();
+                serverInfo.put("id", server.getId());
+                serverInfo.put("name", server.getName());
+                serverInfo.put("transportType", server.getTransportType());
+                serverInfo.put("enabled", server.isEnabled());
+                serverInfo.put("active", activeClients.containsKey(server.getId()));
+                serverInfo.put("status", activeClients.containsKey(server.getId()) ? "RUNNING" : "STOPPED");
+                
+                // Add tool count if server is active
+                if (activeClients.containsKey(server.getId())) {
+                    try {
+                        UniversalMcpClient client = (UniversalMcpClient) activeClients.get(server.getId());
+                        if (client != null) {
+                            List<Object> tools = client.getToolsWithCache();
+                            serverInfo.put("toolCount", tools != null ? tools.size() : 0);
+                        }
+                    } catch (Exception e) {
+                        serverInfo.put("toolCount", 0);
+                        serverInfo.put("error", e.getMessage());
+                    }
+                } else {
+                    serverInfo.put("toolCount", 0);
+                }
+                
+                serverList.add(serverInfo);
+            }
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("servers", serverList);
+            response.put("totalCount", allServers.size());
+            response.put("activeCount", activeClients.size());
+            response.put("timestamp", System.currentTimeMillis());
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Error getting all servers: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
     }
 
     @PostMapping
@@ -81,16 +128,39 @@ public class McpServerController {
     @GetMapping("/{serverId}/tools")
     public ResponseEntity<Map<String, Object>> getServerTools(@PathVariable String serverId) {
         try {
-            var client = mcpServerService.getActiveClients().get(serverId);
+            // Decode URL-encoded server ID
+            String decodedServerId = java.net.URLDecoder.decode(serverId, "UTF-8");
+            log.info("Getting tools for server: {} (decoded: {})", serverId, decodedServerId);
+            
+            // Check if server exists in database first
+            List<McpServerConfig> allServers = mcpServerService.getAllServers();
+            boolean serverExists = allServers.stream()
+                .anyMatch(server -> server.getId().equals(decodedServerId));
+            
+            if (!serverExists) {
+                log.warn("Server not found in database: {}", decodedServerId);
+                return ResponseEntity.badRequest().body(Map.of(
+                    "error", "Server not found",
+                    "serverId", decodedServerId,
+                    "message", "Server does not exist in database"
+                ));
+            }
+            
+            var client = mcpServerService.getActiveClients().get(decodedServerId);
             if (client == null) {
-                return ResponseEntity.badRequest().body(Map.of("message", "No active client found for serverId: " + serverId));
+                log.warn("Server client not active: {}", decodedServerId);
+                return ResponseEntity.badRequest().body(Map.of(
+                    "error", "Server not active",
+                    "serverId", decodedServerId,
+                    "message", "Server is not currently running"
+                ));
             }
 
             if (client instanceof UniversalMcpClient) {
                 UniversalMcpClient universalClient = (UniversalMcpClient) client;
                 List<Object> tools = universalClient.getToolsWithCache(); // Use cached version for performance
                 return ResponseEntity.ok(Map.of(
-                    "serverId", serverId,
+                    "serverId", decodedServerId,
                     "serverName", universalClient.getName(),
                     "count", tools.size(),
                     "tools", tools,
@@ -98,10 +168,18 @@ public class McpServerController {
                 ));
             }
 
-            return ResponseEntity.badRequest().body(Map.of("message", "Client is not a UniversalMcpClient"));
+            return ResponseEntity.badRequest().body(Map.of(
+                "error", "Invalid client type",
+                "serverId", decodedServerId,
+                "message", "Client is not a UniversalMcpClient"
+            ));
         } catch (Exception e) {
             log.error("Error getting tools for server {}: {}", serverId, e.getMessage(), e);
-            return ResponseEntity.internalServerError().body(Map.of("message", e.getMessage()));
+            return ResponseEntity.internalServerError().body(Map.of(
+                "error", "Internal server error",
+                "serverId", serverId,
+                "message", e.getMessage()
+            ));
         }
     }
 
@@ -199,6 +277,250 @@ public class McpServerController {
         } catch (Exception e) {
             log.error("Error refreshing all tool callbacks: {}", e.getMessage(), e);
             return ResponseEntity.internalServerError().body(Map.of("message", e.getMessage()));
+        }
+    }
+
+    @GetMapping("/health")
+    public ResponseEntity<Map<String, Object>> getHealthStatus() {
+        try {
+            Map<String, Object> health = new HashMap<>();
+            
+            // Server status
+            var serverStatus = mcpServerService.getServerStatus();
+            var activeClients = mcpServerService.getActiveClients();
+            
+            // Tool callback provider status
+            var toolProvider = mcpServerService.getToolCallbackProvider();
+            int totalTools = 0;
+            int staticTools = 0;
+            int dynamicTools = 0;
+            
+            if (toolProvider != null) {
+                var callbacks = toolProvider.getToolCallbacks();
+                totalTools = callbacks.length;
+                
+                for (var callback : callbacks) {
+                    if (callback instanceof com.vijay.mcp.DynamicToolCallback) {
+                        dynamicTools++;
+                    } else {
+                        staticTools++;
+                    }
+                }
+            }
+            
+            // Health metrics
+            health.put("status", "healthy");
+            health.put("timestamp", System.currentTimeMillis());
+            health.put("servers", Map.of(
+                "total", serverStatus.size(),
+                "active", activeClients.size(),
+                "status", serverStatus
+            ));
+            health.put("tools", Map.of(
+                "total", totalTools,
+                "static", staticTools,
+                "dynamic", dynamicTools
+            ));
+            health.put("performance", Map.of(
+                "uptime", System.currentTimeMillis() - System.getProperty("java.class.path").hashCode(),
+                "memory", Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory(),
+                "maxMemory", Runtime.getRuntime().maxMemory()
+            ));
+            
+            return ResponseEntity.ok(health);
+        } catch (Exception e) {
+            log.error("Error getting health status: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(Map.of(
+                "status", "unhealthy",
+                "error", e.getMessage(),
+                "timestamp", System.currentTimeMillis()
+            ));
+        }
+    }
+
+    @PostMapping("/bulk-start")
+    public ResponseEntity<Map<String, Object>> bulkStartServers(@RequestBody List<String> serverIds) {
+        try {
+            Map<String, Object> results = new HashMap<>();
+            int successCount = 0;
+            int failureCount = 0;
+            
+            for (String serverId : serverIds) {
+                try {
+                    boolean started = mcpServerService.startServer(serverId);
+                    if (started) {
+                        results.put(serverId, "started");
+                        successCount++;
+                    } else {
+                        results.put(serverId, "failed");
+                        failureCount++;
+                    }
+                } catch (Exception e) {
+                    results.put(serverId, "error: " + e.getMessage());
+                    failureCount++;
+                }
+            }
+            
+            return ResponseEntity.ok(Map.of(
+                "message", "Bulk start completed",
+                "success", successCount,
+                "failures", failureCount,
+                "results", results
+            ));
+        } catch (Exception e) {
+            log.error("Error in bulk start: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(Map.of("message", e.getMessage()));
+        }
+    }
+
+    @PostMapping("/bulk-stop")
+    public ResponseEntity<Map<String, Object>> bulkStopServers(@RequestBody List<String> serverIds) {
+        try {
+            Map<String, Object> results = new HashMap<>();
+            int successCount = 0;
+            int failureCount = 0;
+            
+            for (String serverId : serverIds) {
+                try {
+                    boolean stopped = mcpServerService.stopServer(serverId);
+                    if (stopped) {
+                        results.put(serverId, "stopped");
+                        successCount++;
+                    } else {
+                        results.put(serverId, "failed");
+                        failureCount++;
+                    }
+                } catch (Exception e) {
+                    results.put(serverId, "error: " + e.getMessage());
+                    failureCount++;
+                }
+            }
+            
+            return ResponseEntity.ok(Map.of(
+                "message", "Bulk stop completed",
+                "success", successCount,
+                "failures", failureCount,
+                "results", results
+            ));
+        } catch (Exception e) {
+            log.error("Error in bulk stop: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(Map.of("message", e.getMessage()));
+        }
+    }
+
+    @GetMapping("/statistics")
+    public ResponseEntity<Map<String, Object>> getStatistics() {
+        try {
+            Map<String, Object> stats = mcpServerService.getServerStatistics();
+            return ResponseEntity.ok(stats);
+        } catch (Exception e) {
+            log.error("Error getting statistics: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(Map.of("message", e.getMessage()));
+        }
+    }
+
+    @GetMapping("/servers")
+    public ResponseEntity<Map<String, Object>> getAllServers() {
+        try {
+            List<McpServerConfig> allServers = mcpServerService.getAllServers();
+            Map<String, Object> activeClients = mcpServerService.getActiveClients();
+            
+            List<Map<String, Object>> serverList = new ArrayList<>();
+            
+            for (McpServerConfig server : allServers) {
+                Map<String, Object> serverInfo = new HashMap<>();
+                serverInfo.put("id", server.getId());
+                serverInfo.put("name", server.getName());
+                serverInfo.put("transportType", server.getTransportType());
+                serverInfo.put("enabled", server.isEnabled());
+                serverInfo.put("active", activeClients.containsKey(server.getId()));
+                serverInfo.put("status", activeClients.containsKey(server.getId()) ? "RUNNING" : "STOPPED");
+                
+                // Add tool count if server is active
+                if (activeClients.containsKey(server.getId())) {
+                    try {
+                        UniversalMcpClient client = (UniversalMcpClient) activeClients.get(server.getId());
+                        if (client != null) {
+                            List<Object> tools = client.getToolsWithCache();
+                            serverInfo.put("toolCount", tools != null ? tools.size() : 0);
+                        }
+                    } catch (Exception e) {
+                        serverInfo.put("toolCount", 0);
+                        serverInfo.put("error", e.getMessage());
+                    }
+                } else {
+                    serverInfo.put("toolCount", 0);
+                }
+                
+                serverList.add(serverInfo);
+            }
+            
+            return ResponseEntity.ok(Map.of(
+                "servers", serverList,
+                "totalCount", allServers.size(),
+                "activeCount", activeClients.size(),
+                "timestamp", System.currentTimeMillis()
+            ));
+        } catch (Exception e) {
+            log.error("Error getting all servers: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(Map.of("message", e.getMessage()));
+        }
+    }
+
+    @GetMapping("/{serverId}/status")
+    public ResponseEntity<Map<String, Object>> getServerStatus(@PathVariable String serverId) {
+        try {
+            String decodedServerId = java.net.URLDecoder.decode(serverId, "UTF-8");
+            log.info("Getting status for server: {} (decoded: {})", serverId, decodedServerId);
+            
+            // Check if server exists in database
+            List<McpServerConfig> allServers = mcpServerService.getAllServers();
+            boolean serverExists = allServers.stream()
+                .anyMatch(server -> server.getId().equals(decodedServerId));
+            
+            if (!serverExists) {
+                return ResponseEntity.badRequest().body(Map.of(
+                    "error", "Server not found",
+                    "serverId", decodedServerId,
+                    "status", "NOT_FOUND"
+                ));
+            }
+            
+            Map<String, Object> activeClients = mcpServerService.getActiveClients();
+            boolean isActive = activeClients.containsKey(decodedServerId);
+            
+            Map<String, Object> status = new HashMap<>();
+            status.put("serverId", decodedServerId);
+            status.put("active", isActive);
+            status.put("status", isActive ? "RUNNING" : "STOPPED");
+            status.put("timestamp", System.currentTimeMillis());
+            
+            if (isActive) {
+                try {
+                    UniversalMcpClient client = (UniversalMcpClient) activeClients.get(decodedServerId);
+                    if (client != null) {
+                        status.put("name", client.getName());
+                        status.put("transportType", client.getTransportType());
+                        status.put("connected", client.isConnected());
+                        status.put("initialized", client.isInitialized());
+                        
+                        List<Object> tools = client.getToolsWithCache();
+                        status.put("toolCount", tools != null ? tools.size() : 0);
+                    }
+                } catch (Exception e) {
+                    status.put("error", e.getMessage());
+                    status.put("toolCount", 0);
+                }
+            }
+            
+            return ResponseEntity.ok(status);
+        } catch (Exception e) {
+            log.error("Error getting server status for {}: {}", serverId, e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(Map.of(
+                "error", "Internal server error",
+                "serverId", serverId,
+                "message", e.getMessage()
+            ));
         }
     }
 }

@@ -13,7 +13,6 @@ import org.springframework.ai.mcp.SyncMcpToolCallbackProvider;
 import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.lang.NonNull;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -33,13 +32,12 @@ public class DynamicMcpServerService {
     
     private ToolCallbackProvider toolCallbackProvider;
     
-    @Autowired
-    private UniversalMcpClientFactory clientFactory;
+    private final UniversalMcpClientFactory clientFactory;
+    private final McpServerRepository mcpServerRepository;
     
-    @Autowired
-    private McpServerRepository mcpServerRepository;
-    
-    public DynamicMcpServerService() {
+    public DynamicMcpServerService(UniversalMcpClientFactory clientFactory, McpServerRepository mcpServerRepository) {
+        this.clientFactory = clientFactory;
+        this.mcpServerRepository = mcpServerRepository;
         log.info("📊 Dynamic MCP Server Service initialized with in-memory configuration");
         
         // Initialize with default Python MCP server configuration
@@ -363,7 +361,9 @@ public class DynamicMcpServerService {
         log.info("🔍 Active clients: {}", activeClients.keySet());
         log.info("🔍 Static clients: {}", staticClients.size());
         
+        long startTime = System.currentTimeMillis();
         updateToolCallbackProvider();
+        long endTime = System.currentTimeMillis();
         
         // Verify the refresh
         if (toolCallbackProvider != null) {
@@ -377,9 +377,69 @@ public class DynamicMcpServerService {
                     staticCount++;
                 }
             }
-            log.info("✅ Tool callback provider refreshed - Static: {}, Dynamic: {}, Total: {}", 
-                    staticCount, dynamicCount, callbacks.length);
+            log.info("✅ Tool callback provider refreshed - Static: {}, Dynamic: {}, Total: {} (took {}ms)", 
+                    staticCount, dynamicCount, callbacks.length, (endTime - startTime));
         }
+    }
+    
+    /**
+     * Get detailed server statistics
+     */
+    public Map<String, Object> getServerStatistics() {
+        Map<String, Object> stats = new HashMap<>();
+        
+        // Server counts
+        stats.put("totalServers", serverConfigs.size());
+        stats.put("activeServers", activeClients.size());
+        stats.put("staticServers", staticClients.size());
+        
+        // Tool counts
+        if (toolCallbackProvider != null) {
+            ToolCallback[] callbacks = toolCallbackProvider.getToolCallbacks();
+            int staticCount = 0;
+            int dynamicCount = 0;
+            
+            for (ToolCallback callback : callbacks) {
+                if (callback instanceof com.vijay.mcp.DynamicToolCallback) {
+                    dynamicCount++;
+                } else {
+                    staticCount++;
+                }
+            }
+            
+            stats.put("totalTools", callbacks.length);
+            stats.put("staticTools", staticCount);
+            stats.put("dynamicTools", dynamicCount);
+        }
+        
+        // Server details
+        List<Map<String, Object>> serverDetails = new ArrayList<>();
+        for (Map.Entry<String, UniversalMcpClient> entry : activeClients.entrySet()) {
+            Map<String, Object> serverInfo = new HashMap<>();
+            UniversalMcpClient client = entry.getValue();
+            
+            serverInfo.put("id", entry.getKey());
+            serverInfo.put("name", client.getName());
+            serverInfo.put("transportType", client.getTransportType());
+            serverInfo.put("connected", client.isConnected());
+            serverInfo.put("initialized", client.isInitialized());
+            
+            // Get tool count for this server
+            try {
+                List<Object> tools = client.getToolsWithCache();
+                serverInfo.put("toolCount", tools != null ? tools.size() : 0);
+            } catch (Exception e) {
+                serverInfo.put("toolCount", 0);
+                serverInfo.put("error", e.getMessage());
+            }
+            
+            serverDetails.add(serverInfo);
+        }
+        
+        stats.put("serverDetails", serverDetails);
+        stats.put("timestamp", System.currentTimeMillis());
+        
+        return stats;
     }
     
     /**
