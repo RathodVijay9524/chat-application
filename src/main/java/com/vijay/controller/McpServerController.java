@@ -88,12 +88,13 @@ public class McpServerController {
 
             if (client instanceof UniversalMcpClient) {
                 UniversalMcpClient universalClient = (UniversalMcpClient) client;
-                List<Object> tools = universalClient.listTools();
+                List<Object> tools = universalClient.getToolsWithCache(); // Use cached version for performance
                 return ResponseEntity.ok(Map.of(
                     "serverId", serverId,
                     "serverName", universalClient.getName(),
                     "count", tools.size(),
-                    "tools", tools
+                    "tools", tools,
+                    "cached", true // Indicate this is from cache
                 ));
             }
 
@@ -152,6 +153,51 @@ public class McpServerController {
             return ResponseEntity.ok(status);
         } catch (Exception e) {
             log.error("Error getting injection status: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(Map.of("message", e.getMessage()));
+        }
+    }
+
+    @PostMapping("/{serverId}/refresh-cache")
+    public ResponseEntity<Map<String, Object>> refreshToolCache(@PathVariable String serverId) {
+        try {
+            var client = mcpServerService.getActiveClients().get(serverId);
+            if (client == null) {
+                return ResponseEntity.badRequest().body(Map.of("message", "No active client found for serverId: " + serverId));
+            }
+
+            if (client instanceof UniversalMcpClient) {
+                UniversalMcpClient universalClient = (UniversalMcpClient) client;
+                universalClient.clearToolCache(); // Clear cache
+                List<Object> tools = universalClient.getToolsWithCache(); // Force refresh
+                return ResponseEntity.ok(Map.of(
+                    "message", "Tool cache refreshed successfully",
+                    "serverId", serverId,
+                    "serverName", universalClient.getName(),
+                    "count", tools.size(),
+                    "tools", tools
+                ));
+            }
+
+            return ResponseEntity.badRequest().body(Map.of("message", "Client is not a UniversalMcpClient"));
+        } catch (Exception e) {
+            log.error("Error refreshing tool cache for server {}: {}", serverId, e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(Map.of("message", e.getMessage()));
+        }
+    }
+
+    @PostMapping("/refresh-all-tools")
+    public ResponseEntity<Map<String, Object>> refreshAllTools() {
+        try {
+            log.info("🔄 Force refreshing all tool callbacks...");
+            mcpServerService.forceRefreshToolCallbackProvider();
+            
+            var status = mcpServerService.getServerStatus();
+            return ResponseEntity.ok(Map.of(
+                "message", "All tool callbacks refreshed successfully",
+                "status", status
+            ));
+        } catch (Exception e) {
+            log.error("Error refreshing all tool callbacks: {}", e.getMessage(), e);
             return ResponseEntity.internalServerError().body(Map.of("message", e.getMessage()));
         }
     }

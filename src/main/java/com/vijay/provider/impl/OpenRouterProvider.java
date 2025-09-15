@@ -21,7 +21,7 @@ import java.util.List;
 @Slf4j
 @Component
 public class OpenRouterProvider implements AIProvider {
-
+    
     private final String apiKey;
     private final RAGService ragService;
     private final ToolCallbackProvider toolCallbackProvider;
@@ -85,7 +85,7 @@ public class OpenRouterProvider implements AIProvider {
             
             // Check if AI is requesting MCP tool usage and execute if needed
             String content = processAIToolRequests(response, request.getMessage());
-
+            
             long responseTime = System.currentTimeMillis() - startTime;
 
             // Print API key information to console
@@ -99,7 +99,7 @@ public class OpenRouterProvider implements AIProvider {
             System.out.println("   Response Time: " + responseTime + "ms");
             System.out.println("   Response: " + (content.length() > 100 ? content.substring(0, 100) + "..." : content));
             System.out.println("");
-
+            
             return ChatResponse.builder()
                     .response(content)
                     .provider(getProviderName())

@@ -1,9 +1,11 @@
 package com.vijay.service;
 
 import com.vijay.dto.McpServerConfig;
+import com.vijay.entity.McpServerEntity;
 import com.vijay.mcp.DynamicToolCallback;
 import com.vijay.mcp.UniversalMcpClient;
 import com.vijay.mcp.UniversalMcpClientFactory;
+import com.vijay.repository.McpServerRepository;
 
 import io.modelcontextprotocol.client.McpSyncClient;
 import lombok.extern.slf4j.Slf4j;
@@ -14,13 +16,10 @@ import org.springframework.lang.NonNull;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.reactive.function.client.WebClient;
-
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.io.IOException;
 
 @Slf4j
 @Service
@@ -36,6 +35,9 @@ public class DynamicMcpServerService {
     
     @Autowired
     private UniversalMcpClientFactory clientFactory;
+    
+    @Autowired
+    private McpServerRepository mcpServerRepository;
     
     public DynamicMcpServerService() {
         log.info("📊 Dynamic MCP Server Service initialized with in-memory configuration");
@@ -111,7 +113,12 @@ public class DynamicMcpServerService {
                 return false;
             }
             
-            // Skip database operations for Universal MCP client - use in-memory only
+            // Save to database
+            McpServerEntity entity = convertConfigToEntity(config);
+            McpServerEntity savedEntity = mcpServerRepository.save(entity);
+            log.info("💾 Server configuration saved to database: {} (ID: {})", config.getName(), savedEntity.getId());
+            
+            // Also store in memory for quick access
             serverConfigs.put(config.getId(), config);
             log.info("📊 Server configuration stored in memory: {} (total configs: {})", config.getId(), serverConfigs.size());
             
@@ -156,6 +163,9 @@ public class DynamicMcpServerService {
             
             UniversalMcpClient client = createUniversalClient(config);
             if (client != null) {
+                // Clear any existing cache when starting fresh
+                client.clearToolCache();
+                
                 activeClients.put(serverId, client);
                 log.info("✅ Client created and added to activeClients: {} (total active: {})", 
                         serverId, activeClients.size());
@@ -169,7 +179,14 @@ public class DynamicMcpServerService {
                 log.info("✅ MCP server started successfully: {}", config.getName());
                 return true;
             } else {
-                log.error("❌ Failed to create client for server: {}", config.getName());
+                // Check if this is a static server (handled by Spring AI)
+                if (config.getId().startsWith("static-")) {
+                    log.info("🔧 Static server {} is handled by Spring AI, not UniversalMcpClient", config.getName());
+                    updateToolCallbackProvider(); // Update provider to include static tools
+                    return true; // Consider it "started" since Spring AI handles it
+                } else {
+                    log.error("❌ Failed to create client for dynamic server: {}", config.getName());
+                }
             }
             
             return false;
@@ -186,6 +203,8 @@ public class DynamicMcpServerService {
         try {
             UniversalMcpClient client = activeClients.remove(serverId);
             if (client != null) {
+                // Clear cache when stopping server
+                client.clearToolCache();
                 client.disconnect();
                 updateToolCallbackProvider();
                 log.info("✅ MCP server stopped successfully: {}", serverId);
@@ -207,10 +226,16 @@ public class DynamicMcpServerService {
             // Stop server if running
             stopServer(serverId);
             
+            // Remove from database
+            if (mcpServerRepository.existsById(serverId)) {
+                mcpServerRepository.deleteById(serverId);
+                log.info("💾 MCP server configuration deleted from database: {}", serverId);
+            }
+            
             // Remove configuration from memory
             McpServerConfig removed = serverConfigs.remove(serverId);
             if (removed != null) {
-                log.info(" MCP server configuration removed from memory: {}", removed.getName());
+                log.info("📊 MCP server configuration removed from memory: {}", removed.getName());
                 return true;
             }
             
@@ -225,18 +250,47 @@ public class DynamicMcpServerService {
      * Get all server configurations
      */
     public List<McpServerConfig> getAllServers() {
-        log.info("Getting all servers - serverConfigs size: {}, activeClients size: {}", 
-                serverConfigs.size(), activeClients.size());
-        log.info("Server IDs in configs: {}", serverConfigs.keySet());
+        log.info("Getting all servers from database and memory");
         
-        // Filter out static servers - only return dynamic servers
-        List<McpServerConfig> dynamicServers = serverConfigs.entrySet().stream()
-                .filter(entry -> !entry.getKey().startsWith("static-"))
-                .map(Map.Entry::getValue)
-                .collect(java.util.stream.Collectors.toList());
-        
-        log.info("Returning {} dynamic servers (filtered out static servers)", dynamicServers.size());
-        return dynamicServers;
+        try {
+            // Load from database
+            List<McpServerEntity> entities = mcpServerRepository.findAll();
+            log.info("📊 Found {} servers in database", entities.size());
+            
+            // Convert entities to configs
+            List<McpServerConfig> configs = new ArrayList<>();
+            for (McpServerEntity entity : entities) {
+                McpServerConfig config = convertEntityToConfig(entity);
+                configs.add(config);
+                
+                // Also update memory cache
+                serverConfigs.put(config.getId(), config);
+            }
+            
+            // Add static servers from memory (if any)
+            List<McpServerConfig> staticServers = serverConfigs.entrySet().stream()
+                    .filter(entry -> entry.getKey().startsWith("static-"))
+                    .map(Map.Entry::getValue)
+                    .collect(java.util.stream.Collectors.toList());
+            
+            configs.addAll(staticServers);
+            
+            log.info("📊 Returning {} total servers ({} from database, {} static)", 
+                    configs.size(), entities.size(), staticServers.size());
+            return configs;
+            
+        } catch (Exception e) {
+            log.error("Error loading servers from database: {}", e.getMessage(), e);
+            
+            // Fallback to memory only
+            List<McpServerConfig> dynamicServers = serverConfigs.entrySet().stream()
+                    .filter(entry -> !entry.getKey().startsWith("static-"))
+                    .map(Map.Entry::getValue)
+                    .collect(java.util.stream.Collectors.toList());
+            
+            log.warn("Using fallback - returning {} servers from memory only", dynamicServers.size());
+            return dynamicServers;
+        }
     }
     
     /**
@@ -302,29 +356,44 @@ public class DynamicMcpServerService {
     }
     
     /**
+     * Force refresh the tool callback provider
+     */
+    public void forceRefreshToolCallbackProvider() {
+        log.info("🔄 Force refreshing tool callback provider...");
+        log.info("🔍 Active clients: {}", activeClients.keySet());
+        log.info("🔍 Static clients: {}", staticClients.size());
+        
+        updateToolCallbackProvider();
+        
+        // Verify the refresh
+        if (toolCallbackProvider != null) {
+            ToolCallback[] callbacks = toolCallbackProvider.getToolCallbacks();
+            int staticCount = 0;
+            int dynamicCount = 0;
+            for (ToolCallback callback : callbacks) {
+                if (callback instanceof com.vijay.mcp.DynamicToolCallback) {
+                    dynamicCount++;
+                } else {
+                    staticCount++;
+                }
+            }
+            log.info("✅ Tool callback provider refreshed - Static: {}, Dynamic: {}, Total: {}", 
+                    staticCount, dynamicCount, callbacks.length);
+        }
+    }
+    
+    /**
      * Set static MCP clients (from properties file)
      */
     public void setStaticClients(List<McpSyncClient> clients) {
         this.staticClients.clear();
         if (clients != null) {
             this.staticClients.addAll(clients);
-            log.info(" Set {} static MCP clients", clients.size());
+            log.info("📋 Set {} static MCP clients (handled by Spring AI)", clients.size());
             
-            // Convert static clients to server configs for display
-            for (int i = 0; i < clients.size(); i++) {
-                McpSyncClient client = clients.get(i);
-                McpServerConfig config = new McpServerConfig();
-                config.setId("static-server-" + (i + 1));
-                config.setName("Static MCP Server " + (i + 1));
-                config.setDescription("Static MCP server from application.properties");
-                config.setTransportType(McpServerConfig.McpTransportType.STDIO); // Default to STDIO for static servers
-                config.setEnabled(true); // Static servers are always enabled
-                
-                // Store in serverConfigs for display purposes
-                serverConfigs.put(config.getId(), config);
-            }
-            
-            log.info(" Converted {} static clients to server configs", clients.size());
+            // Don't create server configs for static servers - they're handled by Spring AI
+            // Static servers don't need UniversalMcpClient instances
+            log.info("🔧 Static servers are handled by Spring AI, not UniversalMcpClient");
         }
         updateToolCallbackProvider();
     }
@@ -338,6 +407,18 @@ public class DynamicMcpServerService {
             
             Map<String, Object> clientConfig = new HashMap<>();
             Map<String, Object> configMap = config.getConfiguration();
+            
+            // Handle null configuration for static servers
+            if (configMap == null) {
+                log.warn("⚠️ Configuration is null for server: {} - this might be a static server", config.getName());
+                if (config.getId().startsWith("static-")) {
+                    log.info("🔧 Skipping static server creation (handled by Spring AI): {}", config.getName());
+                    return null; // Static servers are handled by Spring AI, not UniversalMcpClient
+                } else {
+                    log.error("❌ Configuration is null for dynamic server: {}", config.getName());
+                    return null;
+                }
+            }
             
             switch (config.getTransportType()) {
                 case STDIO:
@@ -605,14 +686,18 @@ public class DynamicMcpServerService {
             ObjectMapper mapper = new ObjectMapper();
             int realDynamicToolsCount = 0;
             int processedClients = 0;
+            Set<String> toolNames = new HashSet<>(); // Track tool names to detect duplicates
             
             log.info("🔍 Processing {} active clients for dynamic tools...", activeClients.size());
+            log.info("🔍 Active client IDs: {}", activeClients.keySet());
             
             for (Map.Entry<String, UniversalMcpClient> entry : activeClients.entrySet()) {
                 String clientId = entry.getKey();
                 UniversalMcpClient client = entry.getValue();
                 
                 log.info("🔍 Processing Universal MCP client: {} ({})", clientId, client.getClass().getSimpleName());
+                log.info("🔍 Client details - Name: {}, Transport: {}, Connected: {}", 
+                        client.getName(), client.getTransportType(), client.isConnected());
                 
                 processedClients++;
                 
@@ -661,11 +746,21 @@ public class DynamicMcpServerService {
                                 log.warn("Failed to serialize input schema for tool {}: {}", toolName, schemaError.getMessage());
                             }
 
-                            DynamicToolCallback dynamicCallback = new DynamicToolCallback(toolName, description, inputSchemaJson, client, toolName);
+                            // Allow duplicate tool names from different servers
+                            // Prefix tool name with server name to make them unique
+                            String uniqueToolName = client.getName() + "_" + toolName;
+                            
+                            if (toolNames.contains(uniqueToolName)) {
+                                log.warn("⚠️ DUPLICATE TOOL NAME DETECTED: {} from client {} - SKIPPING", uniqueToolName, client.getName());
+                                continue;
+                            }
+                            
+                            toolNames.add(uniqueToolName);
+                            DynamicToolCallback dynamicCallback = new DynamicToolCallback(uniqueToolName, description, inputSchemaJson, client, toolName);
                             combined.add(dynamicCallback);
                             realDynamicToolsCount++;
                             
-                            log.info("✅ Added dynamic tool: {} from Universal MCP client {}", toolName, client.getName());
+                            log.info("✅ Added dynamic tool: {} from Universal MCP client {} (total: {})", toolName, client.getName(), realDynamicToolsCount);
                         } else {
                             log.warn("⚠️ Unexpected tool format from Universal MCP client {}: {}", client.getName(), t.getClass().getSimpleName());
                         }
@@ -682,6 +777,12 @@ public class DynamicMcpServerService {
             log.info("   - Static callbacks: {}", staticCallbacks != null ? staticCallbacks.length : 0);
             log.info("   - Dynamic callbacks: {} (from {} real clients)", realDynamicToolsCount, processedClients);
             log.info("   - Total callbacks: {}", combined.size());
+            log.info("   - Unique tool names: {}", toolNames.size());
+            log.info("   - Expected dynamic tools: {} ({} servers × 72 tools each)", activeClients.size() * 72, activeClients.size());
+            if (realDynamicToolsCount != activeClients.size() * 72) {
+                log.warn("⚠️ MISMATCH: Expected {} dynamic tools, got {} - checking for duplicates or failures", 
+                        activeClients.size() * 72, realDynamicToolsCount);
+            }
 
             if (combined.isEmpty()) {
                 log.warn("⚠️ No tool callbacks available, returning empty provider");
@@ -725,6 +826,155 @@ public class DynamicMcpServerService {
                 };
             }
         }
+    }
+    
+    /**
+     * Convert McpServerConfig to McpServerEntity for database storage
+     */
+    private McpServerEntity convertConfigToEntity(McpServerConfig config) {
+        McpServerEntity entity = new McpServerEntity();
+        
+        // Basic fields
+        entity.setId(config.getId());
+        entity.setName(config.getName());
+        entity.setDescription(config.getDescription());
+        entity.setEnabled(config.isEnabled());
+        
+        // Transport type conversion
+        switch (config.getTransportType()) {
+            case STDIO:
+                entity.setTransportType(McpServerEntity.TransportType.STDIO);
+                break;
+            case SSE:
+                entity.setTransportType(McpServerEntity.TransportType.SSE);
+                break;
+            case SOCKET:
+                entity.setTransportType(McpServerEntity.TransportType.SOCKET);
+                break;
+            default:
+                entity.setTransportType(McpServerEntity.TransportType.STDIO);
+        }
+        
+        // Status
+        entity.setStatus(McpServerEntity.ServerStatus.STOPPED);
+        
+        // Configuration mapping
+        Map<String, Object> configMap = config.getConfiguration();
+        if (configMap != null) {
+            // STDIO configuration
+            if (config.getTransportType() == McpServerConfig.McpTransportType.STDIO) {
+                entity.setCommand((String) configMap.get("command"));
+                entity.setArgs(convertListToString((List<?>) configMap.get("args")));
+                entity.setWorkingDirectory((String) configMap.get("workingDirectory"));
+                // Store environment as headers field (JSON string)
+                entity.setHeaders(convertMapToString((Map<?, ?>) configMap.get("environment")));
+            }
+            // SSE configuration
+            else if (config.getTransportType() == McpServerConfig.McpTransportType.SSE) {
+                entity.setUrl((String) configMap.get("baseUrl"));
+            }
+            // Socket configuration
+            else if (config.getTransportType() == McpServerConfig.McpTransportType.SOCKET) {
+                entity.setHost((String) configMap.get("host"));
+                Object portObj = configMap.get("port");
+                if (portObj != null) {
+                    entity.setPort(Integer.parseInt(portObj.toString()));
+                }
+                // Store wsUrl in protocol field
+                entity.setProtocol((String) configMap.get("wsUrl"));
+            }
+        }
+        
+        // Set timestamps
+        entity.setCreatedAt(java.time.LocalDateTime.now());
+        entity.setUpdatedAt(java.time.LocalDateTime.now());
+        
+        return entity;
+    }
+    
+    /**
+     * Convert List to comma-separated string
+     */
+    private String convertListToString(List<?> list) {
+        if (list == null || list.isEmpty()) {
+            return null;
+        }
+        return String.join(",", list.stream().map(Object::toString).toArray(String[]::new));
+    }
+    
+    /**
+     * Convert Map to JSON string
+     */
+    private String convertMapToString(Map<?, ?> map) {
+        if (map == null || map.isEmpty()) {
+            return null;
+        }
+        try {
+            ObjectMapper mapper = new ObjectMapper();
+            return mapper.writeValueAsString(map);
+        } catch (Exception e) {
+            log.warn("Failed to convert map to string: {}", e.getMessage());
+            return map.toString();
+        }
+    }
+    
+    /**
+     * Convert McpServerEntity to McpServerConfig for API responses
+     */
+    private McpServerConfig convertEntityToConfig(McpServerEntity entity) {
+        McpServerConfig config = new McpServerConfig();
+        
+        // Basic fields
+        config.setId(entity.getId());
+        config.setName(entity.getName());
+        config.setDescription(entity.getDescription());
+        config.setEnabled(entity.getEnabled());
+        
+        // Transport type conversion
+        switch (entity.getTransportType()) {
+            case STDIO:
+                config.setTransportType(McpServerConfig.McpTransportType.STDIO);
+                break;
+            case SSE:
+                config.setTransportType(McpServerConfig.McpTransportType.SSE);
+                break;
+            case SOCKET:
+                config.setTransportType(McpServerConfig.McpTransportType.SOCKET);
+                break;
+            default:
+                config.setTransportType(McpServerConfig.McpTransportType.STDIO);
+        }
+        
+        // Configuration mapping
+        Map<String, Object> configMap = new HashMap<>();
+        
+        if (entity.getTransportType() == McpServerEntity.TransportType.STDIO) {
+            configMap.put("command", entity.getCommand());
+            if (entity.getArgs() != null) {
+                configMap.put("args", Arrays.asList(entity.getArgs().split(",")));
+            }
+            configMap.put("workingDirectory", entity.getWorkingDirectory());
+            if (entity.getHeaders() != null) {
+                try {
+                    ObjectMapper mapper = new ObjectMapper();
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> envMap = mapper.readValue(entity.getHeaders(), Map.class);
+                    configMap.put("environment", envMap);
+                } catch (Exception e) {
+                    log.warn("Failed to parse environment JSON: {}", e.getMessage());
+                }
+            }
+        } else if (entity.getTransportType() == McpServerEntity.TransportType.SSE) {
+            configMap.put("baseUrl", entity.getUrl());
+        } else if (entity.getTransportType() == McpServerEntity.TransportType.SOCKET) {
+            configMap.put("host", entity.getHost());
+            configMap.put("port", entity.getPort());
+            configMap.put("wsUrl", entity.getProtocol());
+        }
+        
+        config.setConfiguration(configMap);
+        
+        return config;
     }
     
 }

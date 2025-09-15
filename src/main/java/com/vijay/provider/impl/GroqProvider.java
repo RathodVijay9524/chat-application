@@ -131,9 +131,9 @@ public class GroqProvider implements AIProvider {
             String response;
             try {
                 response = dynamicWebClient.post()
-                        .uri("/chat/completions")
-                        .bodyValue(requestBody)
-                        .retrieve()
+                    .uri("/chat/completions")
+                    .bodyValue(requestBody)
+                    .retrieve()
                         .bodyToMono(Map.class)
                         .map(responseMap -> {
                             // Extract the response text from Groq API response

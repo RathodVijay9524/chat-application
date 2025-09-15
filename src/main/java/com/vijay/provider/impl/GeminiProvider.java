@@ -25,7 +25,7 @@ import java.util.Map;
 @Slf4j
 @Component
 public class GeminiProvider implements AIProvider {
-
+    
     private final String defaultApiKey;
     private final DynamicApiKeyService dynamicApiKeyService;
     private final DynamicChatClientService dynamicChatClientService;
@@ -168,7 +168,7 @@ public class GeminiProvider implements AIProvider {
             
             // Check if AI is requesting MCP tool usage and execute if needed
             String content = processAIToolRequests(response, request.getMessage());
-
+            
             long responseTime = System.currentTimeMillis() - startTime;
             
             // Print API key information to console

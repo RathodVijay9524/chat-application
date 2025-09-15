@@ -139,9 +139,20 @@ public class StdioMcpClient extends UniversalMcpClient {
             }
         } catch (Exception e) {
             log.error("❌ Post-initialization tools/list also failed for {}: {}", name, e.getMessage(), e);
+            
+            // Check if it's a timeout exception
+            if (e.getMessage() != null && e.getMessage().contains("timeout")) {
+                log.error("⏰ TIMEOUT DETECTED: MCP server {} is taking too long to respond", name);
+                log.error("💡 SUGGESTIONS:");
+                log.error("   1. Check if Python MCP server is running");
+                log.error("   2. Restart the MCP server process");
+                log.error("   3. Check MCP server logs for errors");
+                log.error("   4. Verify Python environment and dependencies");
+            }
         }
 
         log.warn("⚠️ All tool discovery methods failed for {}, falling back to generic tools.", name);
+        log.warn("🔄 Returning fallback tools to prevent complete failure");
         return createUniversalFallbackTools();
     }
 
@@ -152,7 +163,7 @@ public class StdioMcpClient extends UniversalMcpClient {
         Map<String, Object> request = Map.of("jsonrpc", "2.0", "id", id, "method", "tools/list", "params", Map.of());
         writeFramed(process.getOutputStream(), mapper.writeValueAsString(request));
 
-        int[] timeouts = {5000, 15000}; // 5s, 15s
+        int[] timeouts = {5000, 15000}; // 5s, 15s - Back to original fast timeouts
         for (int timeoutMs : timeouts) {
             long deadline = System.currentTimeMillis() + timeoutMs;
             while (System.currentTimeMillis() < deadline) {

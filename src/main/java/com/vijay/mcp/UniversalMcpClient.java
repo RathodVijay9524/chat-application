@@ -1,6 +1,5 @@
 package com.vijay.mcp;
 
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -19,6 +18,11 @@ public abstract class UniversalMcpClient {
     protected final String transportType;
     protected final ObjectMapper mapper = new ObjectMapper();
     protected boolean initialized = false;
+    
+    // Tool caching for performance
+    protected List<Object> cachedTools = null;
+    protected long toolsCacheTimestamp = 0;
+    protected static final long TOOLS_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
     
     public UniversalMcpClient(String name, String transportType) {
         this.name = name;
@@ -44,6 +48,47 @@ public abstract class UniversalMcpClient {
     public abstract void initialize() throws Exception;
     public abstract List<Object> listTools();
     public abstract Object callTool(String toolName, Map<String, Object> arguments);
+    
+    /**
+     * Get tools with caching for performance
+     */
+    public List<Object> getToolsWithCache() {
+        long currentTime = System.currentTimeMillis();
+        
+        // Check if cache is valid
+        if (cachedTools != null && (currentTime - toolsCacheTimestamp) < TOOLS_CACHE_TTL_MS) {
+            log.debug("🚀 Returning cached tools for {} ({} tools, cache age: {}ms)", 
+                    name, cachedTools.size(), currentTime - toolsCacheTimestamp);
+            return cachedTools;
+        }
+        
+        // Cache is invalid or empty, refresh it
+        log.info("🔄 Refreshing tool cache for {} (cache expired or empty)", name);
+        try {
+            cachedTools = listTools();
+            toolsCacheTimestamp = currentTime;
+            log.info("✅ Tool cache refreshed for {} ({} tools)", name, cachedTools != null ? cachedTools.size() : 0);
+            return cachedTools;
+        } catch (Exception e) {
+            log.error("❌ Failed to refresh tool cache for {}: {}", name, e.getMessage());
+            // Return cached tools if available, even if expired
+            if (cachedTools != null) {
+                log.warn("⚠️ Returning expired cache for {} due to refresh failure", name);
+                return cachedTools;
+            }
+            // Return fallback tools
+            return createUniversalFallbackTools();
+        }
+    }
+    
+    /**
+     * Clear tool cache (useful when server restarts)
+     */
+    public void clearToolCache() {
+        log.info("🗑️ Clearing tool cache for {}", name);
+        cachedTools = null;
+        toolsCacheTimestamp = 0;
+    }
     
     // Common utility methods
     protected String detectServerType() {

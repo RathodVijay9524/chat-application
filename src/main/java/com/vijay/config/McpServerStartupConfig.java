@@ -29,12 +29,18 @@ public class McpServerStartupConfig {
             // Load servers from database
             mcpServerService.loadServersFromMemory();
             
-            // Auto-start all enabled servers (with error handling)
+            // Auto-start all enabled dynamic servers (skip static servers)
             log.info("🔄 Auto-starting enabled dynamic servers...");
             try {
                 mcpServerService.getAllServers().stream()
                     .filter(McpServerConfig::isEnabled)
-                    .forEach(config -> mcpServerService.startServer(config.getId()));
+                    .filter(config -> !config.getId().startsWith("static-")) // Skip static servers
+                    .forEach(config -> {
+                        log.info("🚀 Starting dynamic server: {} ({})", config.getName(), config.getId());
+                        mcpServerService.startServer(config.getId());
+                    });
+                
+                log.info("✅ Dynamic server startup completed (static servers handled by Spring AI)");
             } catch (Exception e) {
                 log.warn("⚠️ Some MCP servers failed to start, but continuing with application startup: {}", e.getMessage());
                 // Don't fail the entire application startup if MCP servers fail
