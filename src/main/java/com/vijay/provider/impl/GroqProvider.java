@@ -209,8 +209,10 @@ public class GroqProvider implements AIProvider {
             "llama-3.1-405b-preview",
             "mixtral-8x7b-32768",
             "gemma-7b-it",
-            "llama-2-70b-4096",
-            "llama-2-7b-2048"
+            "claude-3-sonnet-20240229",
+                "llama-2-70b-4096",
+                "llama-2-7b-2048",
+                "llama3-70b-8192"
         );
     }
 
