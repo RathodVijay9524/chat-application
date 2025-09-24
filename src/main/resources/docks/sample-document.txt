@@ -1,0 +1,31 @@
+Sample Document for RAG Testing
+
+This is a sample document that contains information about various topics.
+
+Key Topics Covered:
+1. Introduction to Artificial Intelligence
+2. Machine Learning Concepts
+3. Natural Language Processing
+4. Deep Learning Applications
+5. Data Science and Analytics
+
+Technical Details:
+- Python programming language
+- TensorFlow and PyTorch frameworks
+- Neural networks and algorithms
+- Data preprocessing and feature engineering
+- Model training and evaluation
+
+Applications:
+- Chatbots and conversational AI
+- Image recognition and computer vision
+- Text analysis and sentiment analysis
+- Recommendation systems
+- Autonomous vehicles
+
+Conclusion:
+This document provides an overview of modern AI technologies and their practical applications in various industries.
+
+Author: Vijay
+Date: 2025
+Version: 1.0

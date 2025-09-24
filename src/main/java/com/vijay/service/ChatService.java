@@ -17,6 +17,7 @@ import java.util.UUID;
 public class ChatService {
     
     private final AIProviderFactory providerFactory;
+    private final SimpleRAGService simpleRAGService;
     
     public ChatResponse generateResponse(ChatRequest request) {
         System.out.println("🔍 ChatService.generateResponse called");
@@ -31,6 +32,23 @@ public class ChatService {
         if (request.getConversationId() == null) {
             request.setConversationId(UUID.randomUUID().toString());
         }
+        
+        // Check if RAG is requested
+        String enhancedMessage = request.getMessage();
+        if (request.getMessage().toLowerCase().contains("@rag") || request.getMessage().toLowerCase().contains("@document")) {
+            enhancedMessage = enhanceWithRAG(request.getMessage());
+            log.info("🔍 RAG Enhancement applied: {}", enhancedMessage);
+        }
+        
+        // Update the request with enhanced message
+        ChatRequest enhancedRequest = new ChatRequest();
+        enhancedRequest.setMessage(enhancedMessage);
+        enhancedRequest.setProvider(request.getProvider());
+        enhancedRequest.setModel(request.getModel());
+        enhancedRequest.setConversationId(request.getConversationId());
+        enhancedRequest.setGeminiApiKey(request.getGeminiApiKey());
+        enhancedRequest.setOpenaiApiKey(request.getOpenaiApiKey());
+        enhancedRequest.setClaudeApiKey(request.getClaudeApiKey());
         
         AIProvider provider = providerFactory.getProvider(request.getProvider());
         if (provider == null) {
@@ -51,7 +69,39 @@ public class ChatService {
                     .build();
         }
         
-        return provider.generateResponse(request);
+        return provider.generateResponse(enhancedRequest);
+    }
+    
+    /**
+     * Enhance message with RAG context
+     */
+    private String enhanceWithRAG(String originalMessage) {
+        try {
+            // Remove RAG trigger words
+            String cleanMessage = originalMessage.replaceAll("(?i)@rag|@document", "").trim();
+            
+            // Try to get RAG context from available documents
+            String ragContext = "";
+            
+            // Check if Vijay's profile is loaded
+            if (simpleRAGService.isRAGAvailable()) {
+                String vijayContext = simpleRAGService.chatWithPDF(cleanMessage, "vijay-rathod-profile.txt");
+                if (!vijayContext.contains("not found") && !vijayContext.contains("couldn't find")) {
+                    ragContext += "\n\n📄 Document Context (Vijay's Profile):\n" + vijayContext;
+                }
+            }
+            
+            // If we have RAG context, enhance the message
+            if (!ragContext.isEmpty()) {
+                return cleanMessage + ragContext;
+            } else {
+                return cleanMessage + "\n\n📄 Note: No relevant document context found. You can ask about Vijay's profile, experience, or skills.";
+            }
+            
+        } catch (Exception e) {
+            log.error("Error enhancing message with RAG: {}", e.getMessage());
+            return originalMessage.replaceAll("(?i)@rag|@document", "").trim();
+        }
     }
     
     public List<ProviderInfo> getAvailableProviders() {

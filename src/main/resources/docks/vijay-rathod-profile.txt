@@ -1,0 +1,124 @@
+Vijay Rathod - Professional Profile
+=====================================
+
+Contact Information:
+📍 Pune, India
+📞 +91-9011742634
+📧 vijayrathod9524@gmail.com
+
+Professional Summary:
+Experienced Software Engineer with 6+ years in Java 8, Spring Boot, Microservices, Angular, and React. Skilled in building secure REST APIs, implementing JWT, Spring Security, and transaction management. Proficient in event-driven architecture using Kafka, with hands-on experience in Saga patterns (Orchestration & Choreography) and CQRS. Strong in CI/CD, Docker, Kubernetes, and Jenkins. Worked with top clients like Barclays, Infosys, IBM, and Accenture in Agile environments.
+
+Education:
+Master of Computer Science (IT)
+Dr. BAMU University, Aurangabad | 2014
+
+Professional Experience:
+
+1. Talent-Ployer (Payroll) | Client: Infosys | End Client: Barclays
+   Duration: May 2024 – Present
+   Technologies: Java, Spring Boot, React
+   Responsibilities: Developed business banking applications and backend APIs.
+
+2. Civica, Vadodara (Remote – Pune)
+   Duration: May 2023 – May 2024
+   Technologies: Java, Spring Boot, Angular
+   Responsibilities: Built UI and backend APIs for Australian local government platform.
+
+3. IBM, Pune (Payroll: Primus Globule)
+   Duration: Dec 2022 – Feb 2023
+   Technologies: Java, Spring Boot, Angular
+   Responsibilities: Developed logistics microservices for Navistar's WMS platform.
+
+4. Accenture, Pune (Payroll: Primus Globule)
+   Duration: June 2021 – June 2022
+   Technologies: Java, Spring Boot, Angular
+   Responsibilities: Worked on secure microservices and enterprise UI development.
+
+5. OMVSAB IT Solutions, Pune
+   Duration: Nov 2017 – May 2021
+   Technologies: Java, Spring, JSP, Thymeleaf, Servlet, jQuery, Ajax, Vue.js
+   Responsibilities: End-to-end development of business web applications.
+
+Technical Skills, Tools & Technologies:
+
+Languages:
+- Java
+- Java 8
+- WebFlux
+
+Frameworks:
+- Spring Boot
+- Spring Security
+- AOP (Aspect-Oriented Programming)
+- Spring Data JPA
+
+Frontend Technologies:
+- Angular (RxJS, NgRx)
+- React (Hooks, Context API, Redux)
+
+Databases:
+- MySQL
+- Oracle
+- Redis
+
+DevOps & Build Tools:
+- Maven
+- Git
+- Jenkins
+- Docker
+- Kubernetes
+
+Testing:
+- JUnit
+- Mockito
+
+IDEs:
+- STS (Spring Tool Suite)
+- IntelliJ IDEA
+
+API Testing:
+- Postman
+- Insomnia
+
+Monitoring & Logging:
+- Log4j
+- Splunk
+- Putty
+
+Microservices & Event-Driven Architecture:
+- Eureka
+- Zipkin
+- Sleuth
+- Boot Admin
+
+Career Highlights:
+
+✅ Designed and implemented RESTful APIs and microservices architecture to build scalable, modular, and loosely coupled systems
+
+✅ Developed and maintained robust enterprise applications using Java 8, Spring Boot, Spring Security, JMS, AOP, and Angular
+
+✅ Leveraged Spring Data JPA to enable seamless and optimized interaction with relational databases such as MySQL
+
+✅ Applied expertise in transaction management, AOP, Spring Boot profiling, and JWT-based security to ensure secure and performant software
+
+✅ Experienced with CI/CD pipelines using Jenkins, TeamCity, Maven, Git, Docker, and Kubernetes for automated delivery and deployment
+
+✅ Implemented design patterns like Singleton, Factory, Builder, and Saga (orchestration & choreography) with Kafka to enable scalable, event-driven microservices
+
+✅ Proficient in high-level and low-level system design for scalable, enterprise-ready applications
+
+✅ Configured and managed CI/CD pipelines using TeamCity, including automated builds, test execution, and production deployments for microservices-based applications
+
+✅ Improved application response time by optimizing database queries, minimizing API latency, and implementing lazy loading where appropriate
+
+✅ Reduced API response time by 40% by optimizing service-to-service communication and DB queries
+
+Key Achievements:
+- 6+ years of professional software development experience
+- Worked with major clients: Barclays, Infosys, IBM, Accenture
+- Expertise in microservices architecture and event-driven systems
+- Strong background in Java ecosystem and Spring framework
+- Proven track record in performance optimization and system design
+- Experience with modern frontend frameworks (Angular, React)
+- Comprehensive DevOps and CI/CD experience

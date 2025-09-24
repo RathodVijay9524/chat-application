@@ -130,6 +130,60 @@ public class ChatController {
         }
     }
     
+    @PostMapping("/rag-chat")
+    public ResponseEntity<ChatResponse> ragChat(@RequestBody ChatRequest request, HttpServletRequest httpRequest) {
+        log.info("Received RAG-enabled chat request: provider={}, model={}, message={}, userId={}", 
+                request.getProvider(), request.getModel(), request.getMessage(), request.getUserId());
+        
+        try {
+            // User session management
+            String userId = request.getUserId();
+            if (userId != null && !userId.trim().isEmpty()) {
+                System.out.println("🔍 RAG CHAT: User ID = " + userId);
+                
+                // Get or create conversation
+                Conversation conversation = conversationService.getOrCreateConversation(request);
+                System.out.println("🔍 RAG CONVERSATION: ID = " + conversation.getConversationId());
+                
+                // Update user session activity
+                userSessionService.validateAndUpdateSession(userId, "chat/rag-message");
+            }
+            
+            // Add RAG trigger to the message
+            String originalMessage = request.getMessage();
+            String ragMessage = originalMessage + " @rag";
+            request.setMessage(ragMessage);
+            
+            log.info("🔍 RAG Enhancement: Original='{}', Enhanced='{}'", originalMessage, ragMessage);
+            
+            ChatResponse response = chatService.generateResponse(request);
+            log.info("Generated RAG-enhanced response successfully for provider: {}", request.getProvider());
+            
+            // Save chat message to database if user is authenticated
+            if (userId != null && !userId.trim().isEmpty()) {
+                try {
+                    // Restore original message for saving
+                    request.setMessage(originalMessage);
+                    ChatMessage savedMessage = conversationService.saveChatMessage(request, response);
+                    System.out.println("🔍 RAG CHAT MESSAGE SAVED: ID = " + savedMessage.getId());
+                } catch (Exception e) {
+                    log.error("Failed to save RAG chat message: {}", e.getMessage());
+                }
+            }
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Error processing RAG chat request", e);
+            ChatResponse errorResponse = ChatResponse.builder()
+                    .response("An error occurred while processing your RAG-enhanced request.")
+                    .provider(request.getProvider())
+                    .conversationId(request.getConversationId())
+                    .error(e.getMessage())
+                    .build();
+            return ResponseEntity.internalServerError().body(errorResponse);
+        }
+    }
+    
     @GetMapping("/providers")
     public ResponseEntity<List<ProviderInfo>> getProviders() {
         log.info("Fetching available providers");
